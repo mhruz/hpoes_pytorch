@@ -2,7 +2,6 @@ from .architectures import V2VModel as V2V
 from Utils import v2v_misc
 import h5py
 import numpy as np
-import cupy
 import argparse
 import time
 import io
@@ -11,12 +10,11 @@ import sys
 
 import torch
 import torch.nn as nn
-
-from chainer import optimizers
-import chainer.functions as F
-from chainer.cuda import to_cpu, to_gpu
-from chainer import serializers
-import chainer
+import torch.optim as optim
+import torch.multiprocessing as mp
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.cuda import amp
+import torch.distributed as dist
 
 if __name__ == '__main__':
     # parse commandline
@@ -24,32 +22,30 @@ if __name__ == '__main__':
     parser.add_argument('train_h5', type=str, help='path to training h5 file with non-augmented data')
     parser.add_argument('--init_net', type=str,
                         help='path to pre-trained network (h5), if you want to continue training')
-    parser.add_argument('--init_epoch', type=int, help='number of the initial epoch, if continuing training')
     parser.add_argument('--max_epoch', type=int, help='number of epochs to perform, default value = 10', default=10)
     parser.add_argument('--batch_size', type=int, help='batch size in each iteration, default value = 8', default=8)
     parser.add_argument('--dev_h5', type=str, help='path to development h5 file with non-augmented data')
     parser.add_argument('--log', type=str, help='path to output log file')
     parser.add_argument('--save_iter', type=int, help='interval of saving a model (in epochs), default = 1', default=1)
     parser.add_argument('--data_label', type=str, help='the label of data in the H5 file, default = real_voxels',
-                        default='synt_voxels')
+                        default='real_voxels')
     parser.add_argument('--read_data_to_memory', type=bool,
                         help='whether to read all the training data to memory, only '
                              'use for reasonable small data (< RAM)')
-    parser.add_argument('--number_of_gpus', type=int, help='name of GPUs to use for computing, default = 1', default=1)
+    parser.add_argument('--number_of_gpus', type=int, help='number of GPUs to use for computing, default = 1',
+                        default=1)
+    parser.add_argument('--number_of_nodes', type=int, help='number of nodes to use for computing, default = 1',
+                        default=1)
     parser.add_argument('output', type=str, help='name of the output model')
     args = parser.parse_args()
 
     batch_size = args.batch_size
     max_epochs = args.max_epoch
+    epoch_idx = 0
 
     augment = True
     logging = False
     dev = False
-
-    # check if the batch size is divisible by number of gpus
-    if batch_size % args.number_of_gpus != 0:
-        print('Batch size is not divisible by the number of GPUs. Exiting.')
-        sys.exit(0)
 
     if args.log is not None:
         f_log = open(args.log, 'wt')
@@ -60,20 +56,22 @@ if __name__ == '__main__':
     numJoints = f_train['labels'].shape[1]
 
     # create multiple models on multiple GPUs
-    models = [V2V(1, numJoints)]
+    model = V2V(1, numJoints)
+    # Choose an optimizer algorithm
+    optimizer = optim.RMSprop(model.parameters(), lr=0.00025)
+    # choose criterion
+    criterion = nn.MSELoss()
 
     if args.init_net is not None:
-        serializers.load_hdf5(args.init_net, models[0])
+        checkpoint = torch.load(args.init_net)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        epoch_idx = checkpoint["epoch"]
+        loss = checkpoint["loss"]
 
-    for i in range(1, args.number_of_gpus):
-        models.append(models[0].copy())
-
-    for i, m in enumerate(models):
-        try:
-            m.to_gpu(i)
-        except cupy.cuda.runtime.CUDARuntimeError:
-            print('Invalid number of GPUs specified. Error on GPU id {}.'.format(i))
-            sys.exit(0)
+    # use multiple GPUs
+    if args.number_of_gpus > 1:
+        model = DistributedDataParallel(model, )
 
     key = args.data_label
 
@@ -120,22 +118,8 @@ if __name__ == '__main__':
         if args.dev_h5 is not None:
             data_dev = f_dev
 
-    # Choose an optimizer algorithm
-    optimizer = optimizers.RMSprop(lr=0.00025)
-
-    # Give the optimizer a reference to the model so that it
-    # can locate the model's parameters.
-    optimizer.setup(models[0])
-
     # get the indexes of data for later shuffling
     indexes_all = list(range(len(f_train[key].keys())))
-
-    # loop through the data
-    idx = 0
-    if args.init_epoch is not None:
-        epoch_idx = args.init_epoch
-    else:
-        epoch_idx = 0
 
     while epoch_idx < max_epochs:
         if logging:
@@ -146,41 +130,44 @@ if __name__ == '__main__':
         if dev:
             dev_loss = []
             num_samples = len(data_dev[key])
-            with chainer.using_config('train', False):
-                for i in range(0, num_samples, batch_size):
-                    batch_data = []
-                    batch_labels = []
-                    for idx in range(min(batch_size, num_samples - i)):
-                        pdata = data_dev[key][str(i)][:].tostring()
-                        _file = io.BytesIO(pdata)
-                        data = np.load(_file)['arr_0']
+            model.eval()
 
-                        batch_data.append(data)
-                        batch_labels.append(data_dev['labels'][idx + i])
+            for i in range(0, num_samples, batch_size):
+                batch_data = []
+                batch_labels = []
+                for idx in range(min(batch_size, num_samples - i)):
+                    pdata = data_dev[key][str(i)][:].tostring()
+                    _file = io.BytesIO(pdata)
+                    data = np.load(_file)['arr_0']
 
-                    batch_data = np.array(batch_data, dtype=np.float32)
-                    batch_labels = np.array(batch_labels)
-                    batch_data = np.expand_dims(batch_data, 1)
+                    batch_data.append(data)
+                    batch_labels.append(data_dev['labels'][idx + i])
 
-                    # divide the data
-                    batch_data_gpu = []
-                    target_gpu = []
+                batch_data = np.array(batch_data, dtype=np.float32)
+                batch_labels = np.array(batch_labels)
+                batch_data = np.expand_dims(batch_data, 1)
 
-                    one_gpu_load = batch_data.shape[0] // args.number_of_gpus
-                    for g in range(args.number_of_gpus):
-                        batch_data_gpu.append(batch_data[g * one_gpu_load:(g + 1) * one_gpu_load])
-                        target_gpu.append(v2v_misc.makeHeatMapsGPU(batch_labels, device=g))
+                model
 
-                    # forward pass through the net
-                    for n, m in enumerate(models):
-                        pred = m(to_gpu(batch_data_gpu[n]))
-                        # calculate loss
-                        loss = F.mean_squared_error(pred, target_gpu[n])
-                        dev_loss.append(to_cpu(loss.data))
+                # divide the data
+                batch_data_gpu = []
+                target_gpu = []
 
-                dev_loss = np.mean(np.array(dev_loss))
-                f_log.write('Dev loss: {}\n'.format(dev_loss))
-                f_log.flush()
+                one_gpu_load = batch_data.shape[0] // args.number_of_gpus
+                for g in range(args.number_of_gpus):
+                    batch_data_gpu.append(batch_data[g * one_gpu_load:(g + 1) * one_gpu_load])
+                    target_gpu.append(v2v_misc.makeHeatMapsGPU(batch_labels, device=g))
+
+                # forward pass through the net
+                for n, m in enumerate(models):
+                    pred = m(to_gpu(batch_data_gpu[n]))
+                    # calculate loss
+                    loss = F.mean_squared_error(pred, target_gpu[n])
+                    dev_loss.append(to_cpu(loss.data))
+
+            dev_loss = np.mean(np.array(dev_loss))
+            f_log.write('Dev loss: {}\n'.format(dev_loss))
+            f_log.flush()
 
         # in every epoch shuffle the indexes of data
         np.random.shuffle(indexes_all)
@@ -200,9 +187,9 @@ if __name__ == '__main__':
                     data = data.astype(np.float32)
 
                     batch_data.append(data)
-                    batch_labels.append(data_train['labels'][indexes_all[idx+i]])
+                    batch_labels.append(data_train['labels'][indexes_all[idx + i]])
 
-                    cubes.append(data_train['cubes'][indexes_all[idx+i]])
+                    cubes.append(data_train['cubes'][indexes_all[idx + i]])
 
                 (batch_data, batch_labels) = v2v_misc.augmentation_volumetric(batch_data, batch_labels, cubes)
                 batch_data = np.expand_dims(batch_data, 1)
@@ -213,8 +200,9 @@ if __name__ == '__main__':
 
                 one_gpu_load = batch_data.shape[0] // args.number_of_gpus
                 for g in range(args.number_of_gpus):
-                    batch_data_gpu.append(batch_data[g*one_gpu_load:(g+1)*one_gpu_load])
-                    target_gpu.append(v2v_misc.makeHeatMapsGPU(batch_labels[g*one_gpu_load:(g+1)*one_gpu_load], device=g))
+                    batch_data_gpu.append(batch_data[g * one_gpu_load:(g + 1) * one_gpu_load])
+                    target_gpu.append(
+                        v2v_misc.makeHeatMapsGPU(batch_labels[g * one_gpu_load:(g + 1) * one_gpu_load], device=g))
 
                 # forward pass through the nets
                 loss = []
