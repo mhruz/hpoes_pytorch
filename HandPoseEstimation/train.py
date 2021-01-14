@@ -16,6 +16,30 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.cuda import amp
 import torch.distributed as dist
 
+
+def train_net_on_node(local_rank, global_rank_offset, world_size, args):
+    rank = local_rank + global_rank_offset
+    dist.init_process_group('nccl', rank=rank, world_size=world_size)
+
+    # create multiple models on multiple GPUs
+    model = DDP(V2V(1, numJoints), device_ids=[local_rank])
+    # Choose an optimizer algorithm
+    optimizer = optim.RMSprop(model.parameters(), lr=0.00025)
+    # choose criterion
+    criterion = nn.MSELoss()
+
+    if args.init_net is not None:
+        # make sure the model was saved by process with rank 0
+        map_location = {'cuda:%d' % 0: 'cuda:%d' % local_rank}
+
+        checkpoint = torch.load(args.init_net, map_location=map_location)
+        model.load_state_dict(checkpoint["model_state_dict"])
+
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        epoch_idx = checkpoint["epoch"]
+        loss = checkpoint["loss"]
+
+
 if __name__ == '__main__':
     # parse commandline
     parser = argparse.ArgumentParser(description='Train the V2V-PoseNet on Volumetric data.')
@@ -32,10 +56,6 @@ if __name__ == '__main__':
     parser.add_argument('--read_data_to_memory', type=bool,
                         help='whether to read all the training data to memory, only '
                              'use for reasonable small data (< RAM)')
-    parser.add_argument('--number_of_gpus', type=int, help='number of GPUs to use for computing, default = 1',
-                        default=1)
-    parser.add_argument('--number_of_nodes', type=int, help='number of nodes to use for computing, default = 1',
-                        default=1)
     parser.add_argument('output', type=str, help='name of the output model')
     args = parser.parse_args()
 
@@ -55,23 +75,16 @@ if __name__ == '__main__':
     # determine the number of joints
     numJoints = f_train['labels'].shape[1]
 
-    # create multiple models on multiple GPUs
-    model = V2V(1, numJoints)
-    # Choose an optimizer algorithm
-    optimizer = optim.RMSprop(model.parameters(), lr=0.00025)
-    # choose criterion
-    criterion = nn.MSELoss()
+    # when training on multi-node environment, make sure these environment variables were set before running script
+    gpus_per_node = int(os.environ['PBS_NGPUS'])
+    world_size = int(os.environ['OMPI_COMM_WORLD_SIZE']) * gpus_per_node
+    node_id = int(os.environ['OMPI_COMM_WORLD_RANK'])
 
-    if args.init_net is not None:
-        checkpoint = torch.load(args.init_net)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        epoch_idx = checkpoint["epoch"]
-        loss = checkpoint["loss"]
+    # the limits of global ranks of the processes to be run on this node
+    ranks = (node_id * gpus_per_node, (node_id + 1) * gpus_per_node)
+    global_rank_offset = ranks[0]
 
-    # use multiple GPUs
-    if args.number_of_gpus > 1:
-        model = DistributedDataParallel(model, )
+    mp.spawn(train_net_on_node, args=(global_rank_offset, world_size, args))
 
     key = args.data_label
 
