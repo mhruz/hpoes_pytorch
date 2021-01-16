@@ -1,18 +1,16 @@
 import sys
 import math
 import random
-from multiprocessing import Pool, Array, sharedctypes
 import time
 import numpy
+import torch
 from scipy.ndimage.interpolation import zoom
 from scipy.ndimage import rotate
 from scipy.interpolate import interpn
-from chainer import functions as F
-from chainer import Variable
 
 try:
     import cupy
-except:
+except ImportError:
     print("An exception occurred cupy import")
     pass
 
@@ -413,42 +411,39 @@ def project_fullvoxel(data, axis=2, flip=False):
     return data
 
 
-def makeHeatMapsGPU(labelStackArray, sigma=1.7, Nvox=44, nominal_cube_shape=250, cubes=None, device=0):
-    with cupy.cuda.Device(device):
-        if cubes is not None:
-            cubes = cupy.asarray(cubes)
+def make_heat_maps_gpu(label_stack, sigma=1.7, Nvox=44, nominal_cube_shape=250, cubes=None, device=0):
+    batch_size = label_stack.shape[0]
+    num_points = label_stack.shape[1]
+    grid_size = Nvox
 
-        batch_size = labelStackArray.shape[0]
-        grid_size = Nvox
-        num_points = labelStackArray.shape[1]
-        labelStackArray = numpy.moveaxis(labelStackArray, 2, 0)
-        labelStackArray = labelStackArray.reshape([3, batch_size, num_points, 1, 1, 1])
+    label_stack = numpy.moveaxis(label_stack, 2, 0)
+    label_stack = label_stack.reshape([3, batch_size, num_points, 1, 1, 1])
 
-        inv_radius = cupy.ones((batch_size), dtype=cupy.float32)
+    inv_radius = torch.ones(batch_size, dtype=torch.float32, device=device)
 
-        if cubes is not None and not all(cubes[:, 0] == nominal_cube_shape):
-            inv_radius /= (nominal_cube_shape / cubes[:, 0]) ** 2
+    if cubes is not None and not all(cubes[:, 0] == nominal_cube_shape):
+        inv_radius /= (nominal_cube_shape / cubes[:, 0]) ** 2
 
-        inv_radius *= -cupy.float32(1 / (2 * sigma * sigma))
-        x = cupy.arange(grid_size, dtype=cupy.float32).reshape([1, 1, grid_size, 1, 1])
-        y = cupy.arange(grid_size, dtype=cupy.float32).reshape([1, 1, 1, grid_size, 1])
-        z = cupy.arange(grid_size, dtype=cupy.float32).reshape([1, 1, 1, 1, grid_size])
+    inv_radius *= -1 / (2 * sigma * sigma)
 
-        points = cupy.array(labelStackArray)
+    x = torch.arange(grid_size, dtype=torch.float32, device=device).reshape((1, 1, grid_size, 1, 1))
+    y = torch.arange(grid_size, dtype=torch.float32, device=device).reshape((1, 1, 1, grid_size, 1))
+    z = torch.arange(grid_size, dtype=torch.float32, device=device).reshape((1, 1, 1, 1, grid_size))
 
-        dx = points[0] - x
-        dy = points[1] - y
-        dz = points[2] - z
-        dx = dx ** 2
-        dy = dy ** 2
-        dz = dz ** 2
-        ds = (dx + dy + dz)
+    points = torch.from_numpy(label_stack).to(device)
 
-        inv_radius = F.broadcast_to(inv_radius, (ds.shape[1], ds.shape[2], ds.shape[3], ds.shape[4], ds.shape[0]))
-        inv_radius = inv_radius.data
-        inv_radius = cupy.moveaxis(inv_radius, 4, 0)
+    dx = points[0] - x
+    dy = points[1] - y
+    dz = points[2] - z
+    dx = dx ** 2
+    dy = dy ** 2
+    dz = dz ** 2
+    ds = (dx + dy + dz)
 
-        value = cupy.exp(inv_radius * ds)
+    inv_radius = inv_radius.expand(ds.shape[1], ds.shape[2], ds.shape[3], ds.shape[4], ds.shape[0])
+    inv_radius = inv_radius.permute(4, 0, 1, 2, 3)
+
+    value = torch.exp(inv_radius * ds)
 
     return value
 
