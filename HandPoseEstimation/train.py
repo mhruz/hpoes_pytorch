@@ -18,7 +18,11 @@ import torch.distributed as dist
 
 
 def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args):
+    # global rank of the process
     rank = local_rank + global_rank_offset
+
+    # device string representation
+    device = "cuda:{}".format(gpu_rank)
 
     augment = True
     logging = False
@@ -61,7 +65,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
     # Choose an optimizer algorithm
     optimizer = optim.RMSprop(model.parameters(), lr=0.00025)
     # choose criterion
-    criterion = nn.MSELoss()
+    loss_fn = nn.MSELoss()
 
     if args.init_net is not None:
         # make sure the model was saved by process with rank 0
@@ -117,6 +121,8 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
 
     # get the indexes of data for later shuffling
     indexes_all = list(range(len(data_train[key].keys())))
+    # the tensor for shuffled indexes, since we use NCCL backend, it has to be stored on GPU
+    indexes_all_tensor = torch.from_numpy(indexes_all).to(device)
 
     while epoch_idx < max_epochs:
         if logging:
@@ -137,107 +143,114 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
                 # compute the index of data for this rank
                 idx0 = i + local_batch_start_idx
 
-                for idx in range(min(local_batch_size, num_samples - i)):
-                    pdata = data_dev[key][str(i + idx0 + idx)][:].tostring()
+                for idx in range(min(local_batch_size, num_samples - idx0)):
+                    pdata = data_dev[key][str(idx0 + idx)][:].tostring()
                     _file = io.BytesIO(pdata)
                     data = np.load(_file)['arr_0']
 
                     batch_data.append(data)
-                    batch_labels.append(data_dev['labels'][i + idx0 + idx])
+                    batch_labels.append(data_dev['labels'][idx0 + idx])
 
                 batch_data = np.array(batch_data, dtype=np.float32)
                 batch_labels = np.array(batch_labels)
                 batch_data = np.expand_dims(batch_data, 1)
 
                 target_gpu = v2v_misc.make_heat_maps_gpu(batch_labels, device=gpu_rank)
+                batch_data_gpu = torch.from_numpy(batch_data).to(device)
 
-                # forward pass through the net
-                for n, m in enumerate(models):
-                    pred = m(to_gpu(batch_data_gpu[n]))
-                    # calculate loss
-                    loss = F.mean_squared_error(pred, target_gpu[n])
-                    dev_loss.append(to_cpu(loss.data))
+                pred = model(batch_data_gpu)
+                loss = loss_fn(pred, target_gpu)
+
+                dev_loss.append(loss.numpy())
 
             dev_loss = np.mean(np.array(dev_loss))
-            f_log.write('Dev loss: {}\n'.format(dev_loss))
+            f_log.write("Dev loss on GPU {}/{}: {}\n".format(rank, device, dev_loss))
             f_log.flush()
 
         # in every epoch shuffle the indexes of data
-        np.random.shuffle(indexes_all)
+        # rank 0 will shuffle
+        if rank == 0:
+            np.random.shuffle(indexes_all)
+            indexes_all_tensor = torch.from_numpy(indexes_all).to(device)
+
+        torch.distributed.broadcast(indexes_all_tensor, 0)
+
         num_samples = len(data_train[key])
-        with chainer.using_config('train', True):
-            for i in range(0, num_samples, local_batch_size):
-                batch_data = []
-                batch_labels = []
-                cubes = []
-                if min(local_batch_size, num_samples - i) < 2:
-                    continue
 
-                for idx in range(min(local_batch_size, num_samples - i)):
-                    sdata = data_train[key][str(indexes_all[idx + i])][:].tostring()
-                    _file = io.BytesIO(sdata)
-                    data = binvox_rw.read_as_3d_array(_file).data
-                    data = data.astype(np.float32)
+        model.train()
 
-                    batch_data.append(data)
-                    batch_labels.append(data_train['labels'][indexes_all[idx + i]])
+        for i in range(0, num_samples, local_batch_size):
+            batch_data = []
+            batch_labels = []
+            cubes = []
 
-                    cubes.append(data_train['cubes'][indexes_all[idx + i]])
+            # compute the index of data for this rank
+            idx0 = i + local_batch_start_idx
 
-                (batch_data, batch_labels) = v2v_misc.augmentation_volumetric(batch_data, batch_labels, cubes)
-                batch_data = np.expand_dims(batch_data, 1)
+            for idx in range(min(local_batch_size, num_samples - idx0)):
+                pdata = data_train[key][indexes_all_tensor[str(idx0 + idx)]][:].tostring()
+                _file = io.BytesIO(pdata)
+                data = np.load(_file)['arr_0']
 
-                # divide the data
-                batch_data_gpu = []
-                target_gpu = []
+                batch_data.append(data)
+                batch_labels.append(data_train['labels'][indexes_all_tensor[idx0 + idx]])
 
-                one_gpu_load = batch_data.shape[0] // args.number_of_gpus
-                for g in range(args.number_of_gpus):
-                    batch_data_gpu.append(batch_data[g * one_gpu_load:(g + 1) * one_gpu_load])
-                    target_gpu.append(
-                        v2v_misc.makeHeatMapsGPU(batch_labels[g * one_gpu_load:(g + 1) * one_gpu_load], device=g))
+                cubes.append(data_train['cubes'][indexes_all_tensor[idx + i]])
 
-                # forward pass through the nets
-                loss = []
+            (batch_data, batch_labels) = v2v_misc.augmentation_volumetric(batch_data, batch_labels, cubes)
+            batch_data = np.expand_dims(batch_data, 1)
 
-                for n, m in enumerate(models):
-                    print("device={}".format(n))
-                    device_data = chainer.Variable(to_gpu(batch_data_gpu[n], device=n))
-                    print(device_data.data.device)
-                    print(device_data.data.shape)
+            # divide the data
+            batch_data_gpu = []
+            target_gpu = []
 
-                    # calculate loss
-                    loss.append(F.mean_squared_error(m(device_data), target_gpu[n]))
+            one_gpu_load = batch_data.shape[0] // args.number_of_gpus
+            for g in range(args.number_of_gpus):
+                batch_data_gpu.append(batch_data[g * one_gpu_load:(g + 1) * one_gpu_load])
+                target_gpu.append(
+                    v2v_misc.makeHeatMapsGPU(batch_labels[g * one_gpu_load:(g + 1) * one_gpu_load], device=g))
 
-                if logging:
-                    for n, l in enumerate(loss):
-                        f_log.write('loss on GPU {}: {}\n'.format(n, to_cpu(l.data)))
+            # forward pass through the nets
+            loss = []
 
-                    f_log.flush()
+            for n, m in enumerate(models):
+                print("device={}".format(n))
+                device_data = chainer.Variable(to_gpu(batch_data_gpu[n], device=n))
+                print(device_data.data.device)
+                print(device_data.data.shape)
 
-                # Calculate the gradients in the network
-                for m in models:
-                    m.cleargrads()
+                # calculate loss
+                loss.append(F.mean_squared_error(m(device_data), target_gpu[n]))
 
-                for l in loss:
-                    l.backward()
+            if logging:
+                for n, l in enumerate(loss):
+                    f_log.write('loss on GPU {}: {}\n'.format(n, to_cpu(l.data)))
 
-                for n in range(1, args.number_of_gpus):
-                    models[0].addgrads(models[n])
+                f_log.flush()
 
-                # Update all the trainable paremters
-                optimizer.update()
+            # Calculate the gradients in the network
+            for m in models:
+                m.cleargrads()
 
-                for n in range(1, args.number_of_gpus):
-                    models[n].copyparams(models[0])
+            for l in loss:
+                l.backward()
 
-        epoch_idx += 1
+            for n in range(1, args.number_of_gpus):
+                models[0].addgrads(models[n])
 
-        # save the intermediate net
-        if epoch_idx % args.save_iter == 0:
-            filename = args.output + '_epoch_' + str(epoch_idx) + '.h5'
-            serializers.save_hdf5(filename, models[0])
-            os.chmod(filename, 0o777)
+            # Update all the trainable paremters
+            optimizer.update()
+
+            for n in range(1, args.number_of_gpus):
+                models[n].copyparams(models[0])
+
+    epoch_idx += 1
+
+    # save the intermediate net
+    if epoch_idx % args.save_iter == 0:
+        filename = args.output + '_epoch_' + str(epoch_idx) + '.h5'
+        serializers.save_hdf5(filename, models[0])
+        os.chmod(filename, 0o777)
 
     if logging:
         f_log.close()

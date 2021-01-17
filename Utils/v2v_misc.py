@@ -8,13 +8,6 @@ from scipy.ndimage.interpolation import zoom
 from scipy.ndimage import rotate
 from scipy.interpolate import interpn
 
-try:
-    import cupy
-except ImportError:
-    print("An exception occurred cupy import")
-    pass
-
-
 def rotation_matrix(axis, theta):
     """
     Return the rotation matrix associated with counterclockwise rotation about
@@ -117,14 +110,21 @@ def voxelM2voxelcoord(V):
     return voxelcoord
 
 
-def augmentation_volumetric(ind3DList, labelStackList, cubes, Nvox_data=88, Nvox_label=44, repetitions=1,
-                            scale_range=[0.8, 1.2], rotation_range=[-40.0, 40.0], translation_range=[-8.0, 8.0],
-                            app_thres=0.5, poly_order=0):
+def augmentation_volumetric(volumetric_data, label_stack, cubes, grid_size_data=88, grid_size_label=44, repetitions=1,
+                            scale_range=None, rotation_range=None, translation_range=None, app_thres=0.5, poly_order=0):
+    # handle default parameters
+    if translation_range is None:
+        translation_range = [-8.0, 8.0]
+    if rotation_range is None:
+        rotation_range = [-40.0, 40.0]
+    if scale_range is None:
+        scale_range = [0.8, 1.2]
+
     Vs = []
-    labelStack_augs = []
-    for volume_aug, labelStack, cube in zip(ind3DList, labelStackList, cubes):
+    label_stack_aug = []
+    for volume_aug, labelStack, cube in zip(volumetric_data, label_stack, cubes):
         for i in range(repetitions):
-            labelStack_aug = points3D2voxelcoord(labelStack, Nvox=Nvox_label, cube=cube)
+            label_stack_aug = points3D2voxelcoord(labelStack, Nvox=grid_size_label, cube=cube)
             draw = [random.random(), random.random(), random.random()]
             if draw[0] >= app_thres:
                 value = [random.uniform(scale_range[0], scale_range[1]),
@@ -133,12 +133,12 @@ def augmentation_volumetric(ind3DList, labelStackList, cubes, Nvox_data=88, Nvox
 
                 volume_aug = volumetric_scale(volume_aug, value, poly_order=poly_order)
 
-                labelStack_aug = scale(labelStack_aug, value, Nvox_label)
+                label_stack_aug = scale(label_stack_aug, value, grid_size_label)
             if draw[1] >= app_thres:
                 value = random.uniform(rotation_range[0], rotation_range[1])
                 volume_aug = rotation_volumetric(volume_aug, value, poly_order=poly_order)
 
-                labelStack_aug = rotation(labelStack_aug, value, Nvox_label)
+                label_stack_aug = rotation(label_stack_aug, value, grid_size_label)
             if draw[2] >= app_thres:
                 value = [random.uniform(translation_range[0], translation_range[1]),
                          random.uniform(translation_range[0], translation_range[1]),
@@ -146,20 +146,20 @@ def augmentation_volumetric(ind3DList, labelStackList, cubes, Nvox_data=88, Nvox
 
                 ind3D_aug = voxelM2voxelcoord(volume_aug)
                 if ind3D_aug.size != 0:
-                    ind3D_aug = translation(ind3D_aug, (value[0], value[1], value[2]), Nvox_data)
-                    volume_aug = voxelM(ind3D_aug, Nvox_data)
+                    ind3D_aug = translation(ind3D_aug, (value[0], value[1], value[2]), grid_size_data)
+                    volume_aug = voxelM(ind3D_aug, grid_size_data)
 
-                    value[0] /= Nvox_data / float(Nvox_label)
-                    value[1] /= Nvox_data / float(Nvox_label)
-                    value[2] /= Nvox_data / float(Nvox_label)
+                    value[0] /= grid_size_data / float(grid_size_label)
+                    value[1] /= grid_size_data / float(grid_size_label)
+                    value[2] /= grid_size_data / float(grid_size_label)
 
-                    labelStack_aug = translation(labelStack_aug, (value[0], value[1], value[2]), Nvox_label)
+                    label_stack_aug = translation(label_stack_aug, (value[0], value[1], value[2]), grid_size_label)
 
             V = volume_aug
             Vs.append(V)
-            labelStack_augs.append(labelStack_aug)
+            label_stack_aug.append(label_stack_aug)
 
-    return numpy.asarray(Vs, dtype='float32'), numpy.asarray(labelStack_augs, dtype='float32')
+    return numpy.asarray(Vs, dtype='float32'), numpy.asarray(label_stack_aug, dtype='float32')
 
 
 def augmentation_volumetric2(ind3DList, labelStackList, cubes, egos, batch_size, Nvox_data=88, Nvox_label=44,
@@ -353,20 +353,7 @@ def augmentation_volumetric_full_voxel(ind3DList, labelStackList, cubes, Nvox_da
     return numpy.asarray(Vs, dtype='float32'), numpy.asarray(labelStack_augs, dtype='float32')
 
 
-def makeHeatMap(params):
-    joint = params[0]
-    sigma = params[1]
-    Nvox = params[2]
-    sigma_2 = 2. * sigma * sigma
-    dist = numpy.sum(numpy.square(numpy.subtract(indLallmatrix, joint)), axis=1)  # vzdalenost vsech od j teho kloubu
-    EE = numpy.zeros((Nvox, Nvox, Nvox), dtype='float32')
-    EE[indLall] = numpy.exp(numpy.divide(-dist, sigma_2))
-
-    return EE
-
-
 # prevede labels na voxels
-
 def makeHeatMaps(labelStackArray, sigma=1.7, Nvox=44, threads=4):
     s = time.time()
     global indLall
@@ -411,10 +398,17 @@ def project_fullvoxel(data, axis=2, flip=False):
     return data
 
 
-def make_heat_maps_gpu(label_stack, sigma=1.7, Nvox=44, nominal_cube_shape=250, cubes=None, device=0):
+def make_heat_maps_gpu(label_stack, sigma=1.7, grid_size=44, nominal_cube_shape=250, cubes=None, device=0):
+    # handle device string
+    device = "cuda:{}".format(device)
+    # select proper mem size for gridsize
+    if grid_size <= 255:
+        grid_size_dtype = torch.uint8
+    else:
+        grid_size_dtype = torch.int16
+
     batch_size = label_stack.shape[0]
     num_points = label_stack.shape[1]
-    grid_size = Nvox
 
     label_stack = numpy.moveaxis(label_stack, 2, 0)
     label_stack = label_stack.reshape([3, batch_size, num_points, 1, 1, 1])
@@ -426,9 +420,9 @@ def make_heat_maps_gpu(label_stack, sigma=1.7, Nvox=44, nominal_cube_shape=250, 
 
     inv_radius *= -1 / (2 * sigma * sigma)
 
-    x = torch.arange(grid_size, dtype=torch.float32, device=device).reshape((1, 1, grid_size, 1, 1))
-    y = torch.arange(grid_size, dtype=torch.float32, device=device).reshape((1, 1, 1, grid_size, 1))
-    z = torch.arange(grid_size, dtype=torch.float32, device=device).reshape((1, 1, 1, 1, grid_size))
+    x = torch.arange(grid_size, dtype=grid_size_dtype, device=device).reshape((1, 1, grid_size, 1, 1))
+    y = torch.arange(grid_size, dtype=grid_size_dtype, device=device).reshape((1, 1, 1, grid_size, 1))
+    z = torch.arange(grid_size, dtype=grid_size_dtype, device=device).reshape((1, 1, 1, 1, grid_size))
 
     points = torch.from_numpy(label_stack).to(device)
 
@@ -444,82 +438,6 @@ def make_heat_maps_gpu(label_stack, sigma=1.7, Nvox=44, nominal_cube_shape=250, 
     inv_radius = inv_radius.permute(4, 0, 1, 2, 3)
 
     value = torch.exp(inv_radius * ds)
-
-    return value
-
-
-def makeHeatMapsCPU(labelStackArray, sigma=1.7, Nvox=44, nominal_cube_shape=250, cubes=None):
-    batch_size = labelStackArray.shape[0]
-    grid_size = Nvox
-    num_points = labelStackArray.shape[1]
-    labelStackArray = numpy.moveaxis(labelStackArray, 2, 0)
-    labelStackArray = labelStackArray.reshape([3, batch_size, num_points, 1, 1, 1])
-
-    inv_radius = numpy.ones((batch_size), dtype=numpy.float32)
-
-    if cubes is not None and not all(cubes[:, 0] == nominal_cube_shape):
-        inv_radius /= (nominal_cube_shape / cubes[:, 0]) ** 2
-
-    inv_radius *= -numpy.float32(1 / (2 * sigma * sigma))
-    x = numpy.arange(grid_size, dtype=numpy.float32).reshape([1, 1, grid_size, 1, 1])
-    y = numpy.arange(grid_size, dtype=numpy.float32).reshape([1, 1, 1, grid_size, 1])
-    z = numpy.arange(grid_size, dtype=numpy.float32).reshape([1, 1, 1, 1, grid_size])
-
-    points = numpy.array(labelStackArray)
-
-    dx = points[0] - x
-    dy = points[1] - y
-    dz = points[2] - z
-    dx = dx ** 2
-    dy = dy ** 2
-    dz = dz ** 2
-    ds = (dx + dy + dz)
-
-    inv_radius = F.broadcast_to(inv_radius, (ds.shape[1], ds.shape[2], ds.shape[3], ds.shape[4], ds.shape[0]))
-    inv_radius = inv_radius.data
-    inv_radius = numpy.moveaxis(inv_radius, 4, 0)
-
-    value = numpy.exp(inv_radius * ds)
-
-    return value
-
-
-def makeHeatMapsGPU16(labelStackArray, sigma=1.7, Nvox=44, nominal_cube_shape=250, cubes=None, device=0):
-    with cupy.cuda.Device(device):
-        if cubes is not None:
-            cubes = cupy.asarray(cubes)
-
-        batch_size = labelStackArray.shape[0]
-        grid_size = Nvox
-        num_points = labelStackArray.shape[1]
-        labelStackArray = numpy.moveaxis(labelStackArray, 2, 0)
-        labelStackArray = labelStackArray.reshape([3, batch_size, num_points, 1, 1, 1])
-
-        inv_radius = cupy.ones((batch_size), dtype=cupy.float16)
-
-        if cubes is not None and not all(cubes[:, 0] == nominal_cube_shape):
-            inv_radius /= (nominal_cube_shape / cubes[:, 0]) ** 2
-
-        inv_radius *= -cupy.float16(1 / (2 * sigma * sigma))
-        x = cupy.arange(grid_size, dtype=cupy.float16).reshape([1, 1, grid_size, 1, 1])
-        y = cupy.arange(grid_size, dtype=cupy.float16).reshape([1, 1, 1, grid_size, 1])
-        z = cupy.arange(grid_size, dtype=cupy.float16).reshape([1, 1, 1, 1, grid_size])
-
-        points = cupy.array(labelStackArray, dtype=cupy.float16)
-
-        dx = points[0] - x
-        dy = points[1] - y
-        dz = points[2] - z
-        dx = dx ** 2
-        dy = dy ** 2
-        dz = dz ** 2
-        ds = (dx + dy + dz)
-
-        inv_radius = F.broadcast_to(inv_radius, (ds.shape[1], ds.shape[2], ds.shape[3], ds.shape[4], ds.shape[0]))
-        inv_radius = inv_radius.data
-        inv_radius = cupy.moveaxis(inv_radius, 4, 0)
-
-        value = cupy.exp(inv_radius * ds)
 
     return value
 
