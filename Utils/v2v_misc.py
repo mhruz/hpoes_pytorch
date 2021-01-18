@@ -91,7 +91,7 @@ def voxelM(ind3d, Nvox=88):
 
     V = numpy.zeros((Nvox, Nvox, Nvox), dtype='bool')
     # indexuje radek sloupec
-    V[ind3d.tolist()] = True
+    V[tuple(ind3d.tolist())] = True
 
     return V
 
@@ -110,8 +110,9 @@ def voxelM2voxelcoord(V):
     return voxelcoord
 
 
-def augmentation_volumetric(volumetric_data, label_stack, cubes, grid_size_data=88, grid_size_label=44, repetitions=1,
-                            scale_range=None, rotation_range=None, translation_range=None, app_thres=0.5, poly_order=0):
+def augmentation_volumetric(volumetric_data, label_stack, cubes=None, grid_size_data=88, grid_size_label=44,
+                            repetitions=1, scale_range=None, rotation_range=None, translation_range=None, app_thres=0.5,
+                            poly_order=0):
     # handle default parameters
     if translation_range is None:
         translation_range = [-8.0, 8.0]
@@ -119,12 +120,14 @@ def augmentation_volumetric(volumetric_data, label_stack, cubes, grid_size_data=
         rotation_range = [-40.0, 40.0]
     if scale_range is None:
         scale_range = [0.8, 1.2]
+    if cubes is None:
+        cubes = [(250.0, 250.0, 250.0)] * len(volumetric_data)
 
     Vs = []
-    label_stack_aug = []
-    for volume_aug, labelStack, cube in zip(volumetric_data, label_stack, cubes):
-        for i in range(repetitions):
-            label_stack_aug = points3D2voxelcoord(labelStack, Nvox=grid_size_label, cube=cube)
+    label_stack_augs = []
+    for i in range(repetitions):
+        for volume_aug, label_stack_aug, cube in zip(volumetric_data, label_stack, cubes):
+            label_stack_aug = points3D2voxelcoord(label_stack_aug, Nvox=grid_size_label, cube=cube)
             draw = [random.random(), random.random(), random.random()]
             if draw[0] >= app_thres:
                 value = [random.uniform(scale_range[0], scale_range[1]),
@@ -157,9 +160,9 @@ def augmentation_volumetric(volumetric_data, label_stack, cubes, grid_size_data=
 
             V = volume_aug
             Vs.append(V)
-            label_stack_aug.append(label_stack_aug)
+            label_stack_augs.append(label_stack_aug)
 
-    return numpy.asarray(Vs, dtype='float32'), numpy.asarray(label_stack_aug, dtype='float32')
+    return numpy.asarray(Vs, dtype='float32'), numpy.asarray(label_stack_augs, dtype='float32')
 
 
 def augmentation_volumetric2(ind3DList, labelStackList, cubes, egos, batch_size, Nvox_data=88, Nvox_label=44,
