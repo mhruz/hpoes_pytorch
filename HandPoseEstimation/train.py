@@ -1,5 +1,5 @@
 from .architectures import V2VModel as V2V
-from Utils import v2v_misc
+from ..Utils import v2v_misc
 import h5py
 import numpy as np
 import argparse
@@ -32,7 +32,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
         log_filename, log_extension = os.path.splitext(args.log)
         args.log = args.log[len(log_extension)]
 
-        f_log = open("{}_rank_{}{}".format(log_filename, rank, log_extension, 'wt'))
+        f_log = open("{}_rank_{}{}".format(log_filename, rank, log_extension), 'wt')
         logging = True
 
     batch_size = args.batch_size
