@@ -58,7 +58,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
         if r < batch_remainder:
             local_batch_start_idx += 1
 
-    f_train = h5py.File(args.train_h5)
+    f_train = h5py.File(args.train_h5, "r")
     # determine the number of joints
     num_joints = f_train['labels'].shape[1]
 
