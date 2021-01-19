@@ -192,7 +192,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             idx0 = i + local_batch_start_idx
 
             for idx in range(min(local_batch_size, num_samples - idx0)):
-                pdata = data_train[key][indexes_all_tensor[str(idx0 + idx)]][:].tostring()
+                pdata = data_train[key][str(indexes_all_tensor[idx0 + idx])][:].tostring()
                 _file = io.BytesIO(pdata)
                 data = np.load(_file)['arr_0']
 
