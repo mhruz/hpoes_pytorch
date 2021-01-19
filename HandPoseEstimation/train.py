@@ -65,7 +65,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
     dist.init_process_group('nccl', rank=rank, world_size=world_size)
 
     # create multiple models on multiple GPUs
-    model = DDP(V2V(1, num_joints), device_ids=[gpu_rank])
+    model = DDP(V2V(1, num_joints).to(gpu_rank), device_ids=[gpu_rank])
     # Choose an optimizer algorithm
     optimizer = optim.RMSprop(model.parameters(), lr=0.00025)
     # choose criterion
