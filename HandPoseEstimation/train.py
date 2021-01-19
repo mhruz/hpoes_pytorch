@@ -165,7 +165,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
                 pred = model(batch_data_gpu)
                 loss = loss_fn(pred, target_gpu)
 
-                dev_loss.append(loss.numpy())
+                dev_loss.append(loss.item())
 
             dev_loss = np.mean(np.array(dev_loss))
             f_log.write("Dev loss on GPU {}/{}: {}\n".format(rank, device, dev_loss))
@@ -193,7 +193,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
 
             for idx in range(min(local_batch_size, num_samples - idx0)):
                 index_of_data = indexes_all_tensor[idx0 + idx].item()
-                
+
                 pdata = data_train[key][str(index_of_data)][:].tostring()
                 _file = io.BytesIO(pdata)
                 data = np.load(_file)['arr_0']
@@ -215,7 +215,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             loss = loss_fn(pred, target_gpu)
 
             if logging:
-                f_log.write('loss on GPU {}: {}\n'.format(rank, loss.numpy()))
+                f_log.write('loss on GPU {}: {}\n'.format(rank, loss.item()))
                 f_log.flush()
 
             loss.backward()
@@ -230,7 +230,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
                 'epoch': epoch_idx,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                'loss': loss
+                'loss': loss.item()
             }, filename)
             os.chmod(filename, 0o777)
 
@@ -242,7 +242,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
         'epoch': epoch_idx,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-        'loss': loss
+        'loss': loss.cpu()
     }, args.output)
 
     os.chmod(args.output, 0o777)
