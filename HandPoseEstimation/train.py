@@ -192,14 +192,16 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             idx0 = i + local_batch_start_idx
 
             for idx in range(min(local_batch_size, num_samples - idx0)):
-                pdata = data_train[key][str(indexes_all_tensor[idx0 + idx])][:].tostring()
+                index_of_data = indexes_all_tensor[idx0 + idx].item()
+                
+                pdata = data_train[key][str(index_of_data)][:].tostring()
                 _file = io.BytesIO(pdata)
                 data = np.load(_file)['arr_0']
 
                 batch_data.append(data)
-                batch_labels.append(data_train['labels'][indexes_all_tensor[idx0 + idx]])
+                batch_labels.append(data_train['labels'][index_of_data])
 
-                cubes.append(data_train['cubes'][indexes_all_tensor[idx0 + idx]])
+                cubes.append(data_train['cubes'][index_of_data])
 
             (batch_data, batch_labels) = v2v_misc.augmentation_volumetric(batch_data, batch_labels, cubes)
             batch_data = np.expand_dims(batch_data, 1)
