@@ -29,12 +29,16 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
     dev = False
 
     if args.log is not None:
-        f_log = open("rank_{}_{}".format(rank, args.log, 'wt'))
+        log_filename, log_extension = os.path.splitext(args.log)
+        args.log = args.log[len(log_extension)]
+
+        f_log = open("{}_rank_{}{}".format(log_filename, rank, log_extension, 'wt'))
         logging = True
 
     batch_size = args.batch_size
     max_epochs = args.max_epoch
     epoch_idx = 0
+    loss = None
 
     # get the closest approximation of local batch size
     local_batch_size = batch_size // world_size
@@ -215,19 +219,30 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             loss.backward()
             optimizer.step()
 
-    epoch_idx += 1
+        epoch_idx += 1
 
-    # save the intermediate net
-    if epoch_idx % args.save_iter == 0:
-        filename = args.output + '_epoch_' + str(epoch_idx) + '.h5'
-        serializers.save_hdf5(filename, models[0])
-        os.chmod(filename, 0o777)
+        # save the intermediate net
+        if epoch_idx % args.save_iter == 0:
+            filename = args.output + '_epoch_' + str(epoch_idx) + '.tar'
+            torch.save({
+                'epoch': epoch_idx,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'loss': loss
+            }, filename)
+            os.chmod(filename, 0o777)
 
     if logging:
         f_log.close()
 
     # save the net
-    serializers.save_hdf5(args.output, models[0])
+    torch.save({
+        'epoch': epoch_idx,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'loss': loss
+    }, args.output)
+
     os.chmod(args.output, 0o777)
 
 
