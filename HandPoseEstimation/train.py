@@ -183,7 +183,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
 
         model.train()
 
-        for i in range(0, num_samples, local_batch_size):
+        for i in range(0, num_samples, batch_size):
             batch_data = []
             batch_labels = []
             cubes = []
