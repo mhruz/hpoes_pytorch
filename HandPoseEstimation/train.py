@@ -124,7 +124,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             data_dev = f_dev
 
     # get the indexes of data for later shuffling
-    indexes_all = list(range(len(data_train[key].keys())))
+    indexes_all = np.asarray(list(range(len(data_train[key].keys()))))
     # the tensor for shuffled indexes, since we use NCCL backend, it has to be stored on GPU
     indexes_all_tensor = torch.from_numpy(indexes_all).to(device)
 
