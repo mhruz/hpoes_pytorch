@@ -6,7 +6,6 @@ import argparse
 import time
 import io
 import os
-import sys
 
 import torch
 import torch.nn as nn
@@ -273,10 +272,11 @@ if __name__ == '__main__':
     node_id = int(os.environ['OMPI_COMM_WORLD_RANK'])
     gpu_rank = int(os.environ['OMPI_COMM_WORLD_LOCAL_RANK'])
 
-    # the limits of global ranks of the processes to be run on this node
-    ranks = (node_id * gpus_per_node, (node_id + 1) * gpus_per_node)
-    global_rank_offset = ranks[0]
+    print("gpus_per_node: {}".format(gpus_per_node))
+    print("gpu_rank: {}".format(gpu_rank))
+    print("size: {}".format(world_size))
+    print("node_id: {}".format(node_id))
 
-    mp.spawn(train_net_on_node, args=(global_rank_offset, world_size, gpu_rank, args), nprocs=ranks[1] - ranks[0])
+    mp.spawn(train_net_on_node, args=(node_id, world_size, gpu_rank, args))
 
 
