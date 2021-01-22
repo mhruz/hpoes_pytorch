@@ -190,7 +190,8 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             # compute the index of data for this rank
             idx0 = i + local_batch_start_idx
 
-            if num_samples - idx0 < local_batch_size:
+            # if there is not enough data for computation, end the epoch prematurely
+            if num_samples - i < batch_size:
                 break
 
             for idx in range(min(local_batch_size, num_samples - idx0)):
@@ -272,7 +273,7 @@ if __name__ == '__main__':
 
     # when training on multi-node environment, make sure these environment variables were set before running script
     gpus_per_node = int(os.environ['PBS_NGPUS'])
-    world_size = int(os.environ['OMPI_COMM_WORLD_SIZE']) * gpus_per_node
+    world_size = int(os.environ['OMPI_COMM_WORLD_SIZE'])
     node_id = int(os.environ['OMPI_COMM_WORLD_RANK'])
     gpu_rank = int(os.environ['OMPI_COMM_WORLD_LOCAL_RANK'])
 
