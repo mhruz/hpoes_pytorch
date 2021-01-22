@@ -190,6 +190,9 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             # compute the index of data for this rank
             idx0 = i + local_batch_start_idx
 
+            if num_samples - idx0 < local_batch_size:
+                break
+
             for idx in range(min(local_batch_size, num_samples - idx0)):
                 index_of_data = indexes_all_tensor[idx0 + idx].item()
 
@@ -223,7 +226,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
         epoch_idx += 1
 
         # save the intermediate net
-        if epoch_idx % args.save_iter == 0:
+        if rank == 0 and epoch_idx % args.save_iter == 0:
             filename = args.output + '_epoch_' + str(epoch_idx) + '.tar'
             torch.save({
                 'epoch': epoch_idx,
@@ -237,14 +240,15 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
         f_log.close()
 
     # save the net
-    torch.save({
-        'epoch': epoch_idx,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'loss': loss.cpu()
-    }, args.output)
+    if rank == 0:
+        torch.save({
+            'epoch': epoch_idx,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'loss': loss.item()
+        }, args.output)
 
-    os.chmod(args.output, 0o777)
+        os.chmod(args.output, 0o777)
 
 
 if __name__ == '__main__':
