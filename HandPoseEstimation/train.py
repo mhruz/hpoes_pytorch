@@ -53,7 +53,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
     # rank0 = 0; rank1 = 3; rank2 = 6; rank3 = 8
     local_batch_start_idx = 0
     for r in range(rank):
-        local_batch_start_idx += batch_size // world_size
+        local_batch_start_idx += local_batch_size
         if r < batch_remainder:
             local_batch_start_idx += 1
 
@@ -127,6 +127,8 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
     # the tensor for shuffled indexes, since we use NCCL backend, it has to be stored on GPU
     indexes_all_tensor = torch.from_numpy(indexes_all).to(device)
 
+    num_samples = len(data_train[key])
+
     while epoch_idx < max_epochs:
         if logging:
             f_log.write('Epoch {}\n'.format(epoch_idx))
@@ -175,10 +177,15 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
         if rank == 0:
             np.random.shuffle(indexes_all)
             indexes_all_tensor = torch.from_numpy(indexes_all).to(device)
+            if logging:
+                f_log.write("Shuffled data. Preparing for broadcast.")
 
         torch.distributed.broadcast(indexes_all_tensor, 0)
-
-        num_samples = len(data_train[key])
+        if logging:
+            if rank == 0:
+                f_log.write("Data broadcasted.")
+            else:
+                f_log.write("Data received.")
 
         model.train()
 
@@ -218,17 +225,27 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             loss = loss_fn(pred, target_gpu)
 
             if logging:
-                f_log.write('loss on GPU {}: {}\n'.format(rank, loss.item()))
-                f_log.flush()
+                f_log.write('Iteration {}, loss on GPU {}: {}\n'.format(i//batch_size, rank, loss.item()))
 
             loss.backward()
+
+            if logging:
+                f_log.write('Loss backward successful.\n')
+
             optimizer.step()
+
+            if logging:
+                f_log.write('Optimizer step successful.\n')
 
         epoch_idx += 1
 
         # save the intermediate net
         if rank == 0 and epoch_idx % args.save_iter == 0:
             filename = args.output + '_epoch_' + str(epoch_idx) + '.tar'
+            if args.log:
+                f_log.write("Saving intermediate model to: {}\n".format(filename))
+                f_log.flush()
+
             torch.save({
                 'epoch': epoch_idx,
                 'model_state_dict': model.state_dict(),
