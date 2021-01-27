@@ -259,6 +259,9 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
                 f_log.write("Model saved successfully\n")
                 f_log.flush()
 
+        # wait for the model to save
+        dist.barrier()
+
     if logging:
         f_log.close()
 
