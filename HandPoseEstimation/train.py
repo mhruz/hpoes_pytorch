@@ -255,6 +255,10 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             }, filename)
             os.chmod(filename, 0o777)
 
+            if args.log:
+                f_log.write("Model saved successfully\n")
+                f_log.flush()
+
     if logging:
         f_log.close()
 
