@@ -236,6 +236,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
 
             if logging:
                 f_log.write('Optimizer step successful.\n')
+                f_log.flush()
 
         epoch_idx += 1
 
