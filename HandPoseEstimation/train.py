@@ -61,10 +61,12 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
     # determine the number of joints
     num_joints = f_train['labels'].shape[1]
 
-    dist.init_process_group('nccl', rank=rank, world_size=world_size)
-
-    # create multiple models on multiple GPUs
-    model = DDP(V2V(1, num_joints).to(gpu_rank), device_ids=[gpu_rank])
+    if world_size > 1:
+        dist.init_process_group('nccl', rank=rank, world_size=world_size)
+        # create multiple models on multiple GPUs
+        model = DDP(V2V(1, num_joints).to(gpu_rank), device_ids=[gpu_rank])
+    else:
+        model = V2V(1, num_joints).to(gpu_rank)
     # Choose an optimizer algorithm
     optimizer = optim.RMSprop(model.parameters(), lr=0.00025)
     # choose criterion
@@ -180,7 +182,9 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             if logging:
                 f_log.write("Shuffled data. Preparing for broadcast.")
 
-        torch.distributed.broadcast(indexes_all_tensor, 0)
+        if world_size > 1:
+            torch.distributed.broadcast(indexes_all_tensor, 0)
+
         if logging:
             if rank == 0:
                 f_log.write("Data broadcasted.")
@@ -297,10 +301,16 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # when training on multi-node environment, make sure these environment variables were set before running script
-    gpus_per_node = int(os.environ['PBS_NGPUS'])
-    world_size = int(os.environ['OMPI_COMM_WORLD_SIZE'])
-    node_id = int(os.environ['OMPI_COMM_WORLD_RANK'])
-    gpu_rank = int(os.environ['OMPI_COMM_WORLD_LOCAL_RANK'])
+    try:
+        gpus_per_node = int(os.environ['PBS_NGPUS'])
+        world_size = int(os.environ['OMPI_COMM_WORLD_SIZE'])
+        node_id = int(os.environ['OMPI_COMM_WORLD_RANK'])
+        gpu_rank = int(os.environ['OMPI_COMM_WORLD_LOCAL_RANK'])
+    except KeyError:
+        gpus_per_node = 1
+        world_size = 1
+        node_id = 0
+        gpu_rank = 0
 
     print("gpus_per_node: {}".format(gpus_per_node))
     print("gpu_rank: {}".format(gpu_rank))
