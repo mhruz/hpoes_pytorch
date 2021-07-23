@@ -15,6 +15,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.cuda import amp
 import torch.distributed as dist
 
+from torchvision.models._utils import IntermediateLayerGetter
+
 
 def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args):
     # global rank of the process
@@ -71,6 +73,10 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
     optimizer = optim.RMSprop(model.parameters(), lr=0.00025)
     # choose criterion
     loss_fn = nn.MSELoss()
+
+    results = {"front_layers": "encoding", "encoder_decoder": "decoded"}
+    intermediate_layers = IntermediateLayerGetter(model, results)
+    out = intermediate_layers(torch.rand(2, 1, 88, 88, 88).to(device))
 
     if args.init_net is not None:
         # make sure the model was saved by process with rank 0
