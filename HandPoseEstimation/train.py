@@ -74,9 +74,11 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
     # choose criterion
     loss_fn = nn.MSELoss()
 
-    results = {"front_layers": "encoding", "encoder_decoder": "decoded"}
-    intermediate_layers = IntermediateLayerGetter(model, results)
-    out = intermediate_layers(torch.rand(2, 1, 88, 88, 88).to(device))
+    results = {"front_layers": "encoding"}
+    res2 = {"encoder_res1": "encoder_res1", "encoder_res2": "encoder_res2"}
+    front_layers = IntermediateLayerGetter(model, results)
+    intermediate_layers = IntermediateLayerGetter(model.encoder_decoder, res2)
+    out = intermediate_layers(model.front_layers(torch.rand(2, 1, 88, 88, 88).to(device)))
 
     if args.init_net is not None:
         # make sure the model was saved by process with rank 0
