@@ -333,3 +333,63 @@ def make_heat_maps_gpu(label_stack, sigma=1.7, grid_size=44, nominal_cube_shape=
     value = torch.exp(inv_radius * ds)
 
     return value
+
+
+def make_global_heat_map_gpu(label_stack, sigma=1.7, grid_size=44, nominal_cube_shape=250, cubes=None, device=0):
+    """
+    The function generates one heatmap for all joints. This is useful when we want to estimate the locations of the
+    joints without classifying them.
+    Args:
+        label_stack:
+        sigma:
+        grid_size:
+        nominal_cube_shape:
+        cubes:
+        device:
+
+    Returns:
+
+    """
+    # handle device string
+    device = "cuda:{}".format(device)
+    # select proper mem size for gridsize
+    if grid_size <= 255:
+        grid_size_dtype = torch.uint8
+    else:
+        grid_size_dtype = torch.int16
+
+    batch_size = label_stack.shape[0]
+    num_points = label_stack.shape[1]
+
+    label_stack = numpy.moveaxis(label_stack, 2, 0)
+    label_stack = label_stack.reshape([3, batch_size, num_points, 1, 1, 1])
+
+    inv_radius = torch.ones(batch_size, dtype=torch.float32, device=device)
+
+    if cubes is not None and not all(cubes[:, 0] == nominal_cube_shape):
+        inv_radius /= (nominal_cube_shape / cubes[:, 0]) ** 2
+
+    inv_radius *= -1 / (2 * sigma * sigma)
+
+    x = torch.arange(grid_size, dtype=grid_size_dtype, device=device).reshape((1, 1, grid_size, 1, 1))
+    y = torch.arange(grid_size, dtype=grid_size_dtype, device=device).reshape((1, 1, 1, grid_size, 1))
+    z = torch.arange(grid_size, dtype=grid_size_dtype, device=device).reshape((1, 1, 1, 1, grid_size))
+
+    points = torch.from_numpy(label_stack).to(device)
+
+    dx = points[0] - x
+    dy = points[1] - y
+    dz = points[2] - z
+    dx = dx ** 2
+    dy = dy ** 2
+    dz = dz ** 2
+    ds = (dx + dy + dz)
+
+    inv_radius = inv_radius.expand(ds.shape[1], ds.shape[2], ds.shape[3], ds.shape[4], ds.shape[0])
+    inv_radius = inv_radius.permute(4, 0, 1, 2, 3)
+
+    value = torch.exp(inv_radius * ds)
+    value, indices = torch.max(value, dim=1, keepdim=True)
+
+    return value
+

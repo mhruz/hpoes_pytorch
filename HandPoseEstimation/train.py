@@ -61,7 +61,10 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
 
     f_train = h5py.File(args.train_h5, "r")
     # determine the number of joints
-    num_joints = f_train['labels'].shape[1]
+    if args.global_joints:
+        num_joints = 1
+    else:
+        num_joints = f_train['labels'].shape[1]
 
     if world_size > 1:
         dist.init_process_group('nccl', rank=rank, world_size=world_size)
@@ -73,12 +76,6 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
     optimizer = optim.RMSprop(model.parameters(), lr=0.00025)
     # choose criterion
     loss_fn = nn.MSELoss()
-
-    results = {"front_layers": "encoding"}
-    res2 = {"encoder_res1": "encoder_res1", "encoder_res2": "encoder_res2"}
-    front_layers = IntermediateLayerGetter(model, results)
-    intermediate_layers = IntermediateLayerGetter(model.encoder_decoder, res2)
-    out = intermediate_layers(model.front_layers(torch.rand(2, 1, 88, 88, 88).to(device)))
 
     if args.init_net is not None:
         # make sure the model was saved by process with rank 0
@@ -170,7 +167,11 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
                 batch_labels = np.array(batch_labels)
                 batch_data = np.expand_dims(batch_data, 1)
 
-                target_gpu = v2v_misc.make_heat_maps_gpu(batch_labels, device=gpu_rank)
+                if args.global_joints:
+                    target_gpu = v2v_misc.make_global_heat_map_gpu(batch_labels, device=gpu_rank)
+                else:
+                    target_gpu = v2v_misc.make_heat_maps_gpu(batch_labels, device=gpu_rank)
+
                 batch_data_gpu = torch.from_numpy(batch_data).to(device)
 
                 pred = model(batch_data_gpu)
@@ -228,7 +229,11 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             (batch_data, batch_labels) = v2v_misc.augmentation_volumetric(batch_data, batch_labels, cubes)
             batch_data = np.expand_dims(batch_data, 1)
 
-            target_gpu = v2v_misc.make_heat_maps_gpu(batch_labels, device=gpu_rank)
+            if args.global_joints:
+                target_gpu = v2v_misc.make_global_heat_map_gpu(batch_labels, device=gpu_rank)
+            else:
+                target_gpu = v2v_misc.make_heat_maps_gpu(batch_labels, device=gpu_rank)
+
             batch_data_gpu = torch.from_numpy(batch_data).to(device)
 
             optimizer.zero_grad()
@@ -237,7 +242,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             loss = loss_fn(pred, target_gpu)
 
             if logging:
-                f_log.write('Iteration {}, loss on GPU {}: {}\n'.format(i//batch_size, rank, loss.item()))
+                f_log.write('Iteration {}, loss on GPU {}: {}\n'.format(i // batch_size, rank, loss.item()))
 
             loss.backward()
 
@@ -271,8 +276,9 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
                 f_log.write("Model saved successfully\n")
                 f_log.flush()
 
-        # wait for the model to save
-        dist.barrier()
+        if world_size > 1:
+            # wait for the model to save
+            dist.barrier()
 
     if logging:
         f_log.close()
@@ -302,6 +308,9 @@ if __name__ == '__main__':
     parser.add_argument('--save_iter', type=int, help='interval of saving a model (in epochs), default = 1', default=1)
     parser.add_argument('--data_label', type=str, help='the label of data in the H5 file, default = real_voxels',
                         default='real_voxels')
+    parser.add_argument('--global_joints', action="store_true",
+                        help='whether to learn the identity of the joints (False) or whether to predict one heatmap of'
+                             'unknown joint locations (True), default = False', default=False)
     parser.add_argument('--read_data_to_memory', type=bool,
                         help='whether to read all the training data to memory, only '
                              'use for reasonable small data (< RAM)')
@@ -326,5 +335,3 @@ if __name__ == '__main__':
     print("node_id: {}".format(node_id))
 
     mp.spawn(train_net_on_node, args=(node_id, world_size, gpu_rank, args))
-
-
