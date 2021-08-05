@@ -79,6 +79,11 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             model = V2V_88(1, num_joints).to(gpu_rank)
         else:
             model = V2V(1, num_joints).to(gpu_rank)
+
+    if logging:
+        f_log.write("Models initialized.")
+        f_log.flush()
+
     # Choose an optimizer algorithm
     optimizer = optim.RMSprop(model.parameters(), lr=0.00025)
     # choose criterion
@@ -105,6 +110,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
     if args.read_data_to_memory is not None:
         if logging:
             f_log.write('Reading training data...\n')
+            f_log.flush()
             s = time.time()
 
         num_samples = len(f_train[key])
@@ -116,6 +122,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
         if logging:
             e = time.time()
             f_log.write('Training data read in {} s\n'.format(e - s))
+            f_log.flush()
 
         if args.dev_h5 is not None:
             if logging:
@@ -330,7 +337,7 @@ if __name__ == '__main__':
     if args.multi_node_params is not None:
         node_id = args.multi_node_params[0]
         world_size = args.multi_node_params[1]
-        gpu_rank = 0
+        gpu_rank = args.multi_node_params[0]
         os.environ['MASTER_ADDR'] = '127.0.0.1'
         os.environ['MASTER_PORT'] = '8888'
     else:
