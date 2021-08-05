@@ -311,27 +311,38 @@ if __name__ == '__main__':
     parser.add_argument('--global_joints', action="store_true",
                         help='whether to learn the identity of the joints (False) or whether to predict one heatmap of'
                              'unknown joint locations (True), default = False', default=False)
-    parser.add_argument('--read_data_to_memory', type=bool,
+    parser.add_argument('--read_data_to_memory', action="store_true",
                         help='whether to read all the training data to memory, only '
-                             'use for reasonable small data (< RAM)')
+                             'use for reasonable small data (< RAM)', default=False)
+    parser.add_argument('--multi_node_params', type=int, nargs=2, help='rank and world_size')
+
     parser.add_argument('output', type=str, help='name of the output model')
     args = parser.parse_args()
 
-    # when training on multi-node environment, make sure these environment variables were set before running script
-    try:
-        gpus_per_node = int(os.environ['PBS_NGPUS'])
-        world_size = int(os.environ['OMPI_COMM_WORLD_SIZE'])
-        node_id = int(os.environ['OMPI_COMM_WORLD_RANK'])
-        gpu_rank = int(os.environ['OMPI_COMM_WORLD_LOCAL_RANK'])
-    except KeyError:
-        gpus_per_node = 1
-        world_size = 1
-        node_id = 0
-        gpu_rank = 0
 
-    print("gpus_per_node: {}".format(gpus_per_node))
+    if args.multi_node_params is not None:
+        node_id = args.multi_node_params[0]
+        world_size = args.multi_node_params[1]
+        gpu_rank = 0
+        os.environ['MASTER_ADDR'] = '127.0.0.1'
+        os.environ['MASTER_PORT'] = '8888'
+    else:
+        # when training on multi-node environment, make sure these environment variables were set before running script
+        try:
+            gpus_per_node = int(os.environ['PBS_NGPUS'])
+            world_size = int(os.environ['OMPI_COMM_WORLD_SIZE'])
+            node_id = int(os.environ['OMPI_COMM_WORLD_RANK'])
+            gpu_rank = int(os.environ['OMPI_COMM_WORLD_LOCAL_RANK'])
+        except KeyError:
+            gpus_per_node = 1
+            world_size = 1
+            node_id = 0
+            gpu_rank = 0
+
+        print("gpus_per_node: {}".format(gpus_per_node))
+
+    print("node_id: {}".format(node_id))
     print("gpu_rank: {}".format(gpu_rank))
     print("size: {}".format(world_size))
-    print("node_id: {}".format(node_id))
 
     mp.spawn(train_net_on_node, args=(node_id, world_size, gpu_rank, args))

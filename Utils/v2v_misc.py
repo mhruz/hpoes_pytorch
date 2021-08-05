@@ -1,9 +1,11 @@
 import math
 import random
 import numpy
+import numpy as np
 import torch
 from scipy.ndimage.interpolation import zoom
 from scipy.ndimage import rotate
+from scipy.interpolate import interpn
 
 
 def rotation_matrix(axis, theta):
@@ -393,3 +395,109 @@ def make_global_heat_map_gpu(label_stack, sigma=1.7, grid_size=44, nominal_cube_
 
     return value
 
+
+def heatMaps2VoxelCPU(heatmaps, Nvox=44):
+    if len(heatmaps.shape) < 5:
+        heatmaps = numpy.expand_dims(heatmaps, 0)
+
+    ret = numpy.zeros((heatmaps.shape[0], heatmaps.shape[1], 3), dtype=numpy.float32)
+
+    grid_size = Nvox
+    x = numpy.arange(grid_size, dtype=numpy.float32).reshape([1, grid_size, 1, 1])
+    y = numpy.arange(grid_size, dtype=numpy.float32).reshape([1, 1, grid_size, 1])
+    z = numpy.arange(grid_size, dtype=numpy.float32).reshape([1, 1, 1, grid_size])
+
+    for (i, hm) in enumerate(heatmaps):
+        w_sum = numpy.sum(hm, axis=(1, 2, 3))
+        avg_x = numpy.sum(x * hm, axis=(1, 2, 3)) / w_sum
+        avg_y = numpy.sum(y * hm, axis=(1, 2, 3)) / w_sum
+        avg_z = numpy.sum(z * hm, axis=(1, 2, 3)) / w_sum
+
+        p3D = numpy.array([avg_x, avg_y, avg_z], dtype=numpy.float32).T
+        ret[i] = p3D
+
+    return ret
+
+
+def heatMaps2Points3D_smooth_max(heatmaps, cubes, Nvox=44, smooth_size=3):
+    # heatmaps have shape (batch, num_joints, Nvox, Nvox, Nvox)
+    if len(heatmaps.shape) < 5:
+        heatmaps = numpy.expand_dims(heatmaps, 0)
+
+    # smooth_size needs to be odd
+    if smooth_size % 2 == 0:
+        smooth_size += 1
+
+    ret = numpy.zeros((heatmaps.shape[0], heatmaps.shape[1], 3), dtype=numpy.float32)
+    ret_conf = numpy.zeros((heatmaps.shape[0], heatmaps.shape[1]), dtype=numpy.float32)
+
+    x1 = numpy.arange(smooth_size)
+    x2 = numpy.arange(smooth_size)
+    x3 = numpy.arange(smooth_size)
+
+    # go through batch data
+    for (i, hm) in enumerate(heatmaps):
+        # go through joints
+        for (j, h) in enumerate(hm):
+            ind = numpy.array(numpy.unravel_index(numpy.argmax(h, axis=None), h.shape))
+            # send the local submatrix to compute the weighted average
+            # H = h[ind[0]-1:ind[0]+2, ind[1]-1:ind[1]+2, ind[2]-1:ind[2]+2]
+
+            H = numpy.zeros((smooth_size, smooth_size, smooth_size), dtype=numpy.float32)
+            left_bound = -(smooth_size - 1) // 2
+            right_bound = (smooth_size - 1) // 2 + 1
+            center = (smooth_size - 1) // 2
+            for a in range(left_bound, right_bound):
+                for b in range(left_bound, right_bound):
+                    for c in range(left_bound, right_bound):
+                        if ind[0] + a >= 0 and ind[0] + a < Nvox and ind[1] + b >= 0 and ind[1] + b < Nvox and ind[
+                            2] + c >= 0 and ind[2] + c < Nvox:
+                            H[a - left_bound, b - left_bound, c - left_bound] = h[
+                                int(ind[0]) + a, int(ind[1]) + b, int(ind[2]) + c]
+                        else:
+                            H[a - left_bound, b - left_bound, c - left_bound] = 0
+
+            H = numpy.expand_dims(H, 0)
+            ind_s = heatMaps2VoxelCPU(H, Nvox=smooth_size)[0]
+            ret[i, j, :] = ((ind + ind_s - center) / float(Nvox) - 0.5) * cubes[i][0]
+
+            ret_conf[i, j] = interpn((x1, x2, x3), H[0], ind_s, bounds_error=False, fill_value=None)
+
+    return ret, ret_conf
+
+
+def detect_best_joint_locations(heatmaps, n_joints, suppress_size):
+    # heatmaps have shape (batch, num_joints, Nvox, Nvox, Nvox)
+    if len(heatmaps.shape) < 5:
+        heatmaps = numpy.expand_dims(heatmaps, 0)
+
+    # pad the heatmaps
+    padded_heatmaps = np.zeros((heatmaps.shape[0], heatmaps.shape[1], heatmaps.shape[2] + suppress_size - 1,
+                                heatmaps.shape[3] + suppress_size - 1, heatmaps.shape[4] + suppress_size - 1))
+
+    pad_start = (suppress_size - 1) // 2
+
+    padded_heatmaps[:, :, pad_start:-pad_start, pad_start:-pad_start, pad_start:-pad_start] = heatmaps
+
+    size = padded_heatmaps.shape[2]
+    # H = numpy.zeros((suppress_size, suppress_size, suppress_size), dtype=numpy.float32)
+
+    maximums_batch = []
+
+    # go through batch data
+    for (i, hm) in enumerate(padded_heatmaps):
+        maximums = []
+        values = []
+        for a in range(size):
+            for b in range(size):
+                for c in range(size):
+                    H = hm[0][a:a + suppress_size, b:b + suppress_size, c:c + suppress_size]
+                    max_idx = np.unravel_index(np.argmax(H), H.shape)
+                    if all(idx == pad_start for idx in max_idx):
+                        values.append(H[pad_start, pad_start, pad_start])
+                        maximums.append([a + pad_start, b + pad_start, c + pad_start])
+
+        maxs_sorted = [x for _, x in sorted(zip(values, maximums), reverse=True)]
+        maximums_batch.append(maxs_sorted[:n_joints])
+
+    return maximums_batch
