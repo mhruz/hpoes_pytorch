@@ -120,12 +120,58 @@ class V2VModel(nn.Module):
         self.encoder_decoder = EncoderDecorder(2 * base_width)
 
         self.back_layers = nn.Sequential(
-            Res3DBlock(32, 32),
-            Basic3DBlock(32, 32, 1),
-            Basic3DBlock(32, 32, 1),
+            Res3DBlock(2 * base_width, 2 * base_width),
+            Basic3DBlock(2 * base_width, 2 * base_width, 1),
+            Basic3DBlock(2 * base_width, 2 * base_width, 1),
         )
 
-        self.output_layer = nn.Conv3d(32, num_joints, kernel_size=1, stride=1, padding=0)
+        self.output_layer = nn.Conv3d(2 * base_width, num_joints, kernel_size=1, stride=1, padding=0)
+
+        self._initialize_weights()
+
+    def forward(self, x):
+        x = self.front_layers(x)
+        x = self.encoder_decoder(x)
+        x = self.back_layers(x)
+        x = self.output_layer(x)
+        return x
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv3d):
+                nn.init.normal_(m.weight, 0, 0.001)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.ConvTranspose3d):
+                nn.init.normal_(m.weight, 0, 0.001)
+                nn.init.constant_(m.bias, 0)
+
+
+class V2VModel_88(nn.Module):
+    """
+    This model has one more decoder layer to output a feature map of 88x88x88
+    """
+    def __init__(self, input_channels, num_joints, width_multiplier=1):
+        super(V2VModel_88, self).__init__()
+        base_width = 16 * width_multiplier
+
+        self.front_layers = nn.Sequential(
+            Basic3DBlock(input_channels, base_width, 7),
+            Pool3DBlock(2),
+            Res3DBlock(base_width, 2 * base_width),
+            Res3DBlock(2 * base_width, 2 * base_width),
+            Res3DBlock(2 * base_width, 2 * base_width)
+        )
+
+        self.encoder_decoder = EncoderDecorder(2 * base_width)
+
+        self.back_layers = nn.Sequential(
+            Res3DBlock(2 * base_width, 2 * base_width),
+            Upsample3DBlock(2 * base_width, 2 * base_width, 2, 2),
+            Basic3DBlock(2 * base_width, 2 * base_width, 1),
+            Basic3DBlock(2 * base_width, 2 * base_width, 1),
+        )
+
+        self.output_layer = nn.Conv3d(2 * base_width, num_joints, kernel_size=1, stride=1, padding=0)
 
         self._initialize_weights()
 
