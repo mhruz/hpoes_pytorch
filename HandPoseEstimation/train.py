@@ -1,4 +1,5 @@
 from .architectures import V2VModel as V2V
+from .architectures import V2VModel_88 as V2V_88
 from ..Utils import v2v_misc
 import h5py
 import numpy as np
@@ -69,9 +70,15 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
     if world_size > 1:
         dist.init_process_group('nccl', rank=rank, world_size=world_size)
         # create multiple models on multiple GPUs
-        model = DDP(V2V(1, num_joints).to(gpu_rank), device_ids=[gpu_rank])
+        if args.global_joints:
+            model = DDP(V2V_88(1, num_joints).to(gpu_rank), device_ids=[gpu_rank])
+        else:
+            model = DDP(V2V(1, num_joints).to(gpu_rank), device_ids=[gpu_rank])
     else:
-        model = V2V(1, num_joints).to(gpu_rank)
+        if args.global_joints:
+            model = V2V_88(1, num_joints).to(gpu_rank)
+        else:
+            model = V2V(1, num_joints).to(gpu_rank)
     # Choose an optimizer algorithm
     optimizer = optim.RMSprop(model.parameters(), lr=0.00025)
     # choose criterion
