@@ -146,12 +146,12 @@ class V2VModel(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
 
-class V2VModel_88(nn.Module):
+class V2VModel88(nn.Module):
     """
     This model has one more decoder layer to output a feature map of 88x88x88
     """
     def __init__(self, input_channels, num_joints, width_multiplier=1):
-        super(V2VModel_88, self).__init__()
+        super(V2VModel88, self).__init__()
         base_width = 16 * width_multiplier
 
         self.front_layers = nn.Sequential(

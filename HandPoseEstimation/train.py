@@ -1,5 +1,5 @@
 from .architectures import V2VModel as V2V
-from .architectures import V2VModel_88 as V2V_88
+from .architectures import V2VModel88 as V2V_88
 from ..Utils import v2v_misc
 import h5py
 import numpy as np
@@ -66,6 +66,11 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
         num_joints = 1
     else:
         num_joints = f_train['labels'].shape[1]
+
+    if args.global_joints:
+        label_grid_size = 88
+    else:
+        label_grid_size = 44
 
     if world_size > 1:
         dist.init_process_group('nccl', rank=rank, world_size=world_size)
@@ -203,16 +208,16 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             np.random.shuffle(indexes_all)
             indexes_all_tensor = torch.from_numpy(indexes_all).to(device)
             if logging:
-                f_log.write("Shuffled data. Preparing for broadcast.")
+                f_log.write("Shuffled data. Preparing for broadcast.\n")
 
         if world_size > 1:
             torch.distributed.broadcast(indexes_all_tensor, 0)
 
         if logging:
             if rank == 0:
-                f_log.write("Data broadcasted.")
+                f_log.write("Data broadcasted.\n")
             else:
-                f_log.write("Data received.")
+                f_log.write("Data received.\n")
 
         model.train()
 
@@ -240,13 +245,14 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
 
                 cubes.append(data_train['cubes'][index_of_data])
 
-            (batch_data, batch_labels) = v2v_misc.augmentation_volumetric(batch_data, batch_labels, cubes)
+            (batch_data, batch_labels) = v2v_misc.augmentation_volumetric(batch_data, batch_labels, cubes,
+                                                                          grid_size_label=label_grid_size)
             batch_data = np.expand_dims(batch_data, 1)
 
             if args.global_joints:
-                target_gpu = v2v_misc.make_global_heat_map_gpu(batch_labels, device=gpu_rank)
+                target_gpu = v2v_misc.make_global_heat_map_gpu(batch_labels, device=gpu_rank, grid_size=label_grid_size)
             else:
-                target_gpu = v2v_misc.make_heat_maps_gpu(batch_labels, device=gpu_rank)
+                target_gpu = v2v_misc.make_heat_maps_gpu(batch_labels, device=gpu_rank, grid_size=label_grid_size)
 
             batch_data_gpu = torch.from_numpy(batch_data).to(device)
 
@@ -332,7 +338,6 @@ if __name__ == '__main__':
 
     parser.add_argument('output', type=str, help='name of the output model')
     args = parser.parse_args()
-
 
     if args.multi_node_params is not None:
         node_id = args.multi_node_params[0]
