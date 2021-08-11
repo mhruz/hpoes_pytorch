@@ -134,10 +134,10 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
                 f_log.write('Reading dev data...\n')
                 s = time.time()
 
-            num_samples = len(f_train[key])
+            num_samples_dev = len(f_dev[key])
             data_dev = {'cubes': f_dev['cubes'][:], 'labels': f_dev['labels'][:], key: {}}
 
-            for i in range(num_samples):
+            for i in range(num_samples_dev):
                 data_dev[key][str(i)] = f_dev[key][str(i)][:]
 
             if logging:
@@ -162,12 +162,12 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
         # compute the loss on dev data if available
         if dev:
             dev_loss = []
-            num_samples = len(data_dev[key])
+            num_samples_dev = len(data_dev[key])
 
             model.eval()
 
             # i represents the starting index of global batch
-            for i in range(0, num_samples, batch_size):
+            for i in range(0, num_samples_dev, batch_size):
                 batch_data = []
                 batch_labels = []
 
