@@ -20,9 +20,11 @@ def rotation_matrix(axis, theta):
     aa, bb, cc, dd = a * a, b * b, c * c, d * d
     bc, ad, ac, ab, bd, cd = b * c, a * d, a * c, a * b, b * d, c * d
 
-    return numpy.array([[aa + bb - cc - dd, 2 * (bc + ad), 2 * (bd - ac)],
+    R =  numpy.array([[aa + bb - cc - dd, 2 * (bc + ad), 2 * (bd - ac)],
                         [2 * (bc - ad), aa + cc - bb - dd, 2 * (cd + ab)],
                         [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc]])
+
+    return R
 
 
 def translation(ind3D, shift, Nvox=88):
@@ -39,6 +41,10 @@ def volumetric_scale(voxels, zoom_factor, threshold=0.4, poly_order=0):
     data_coords = numpy.zeros((3, 2), dtype=numpy.int)
     zoom_coords = numpy.zeros((3, 2), dtype=numpy.int)
 
+    # axis fix for [row, col, depth] == [y, x, z]
+    zoom_factor = [zoom_factor[1], zoom_factor[0], zoom_factor[2]]
+
+    voxels = voxels.astype(np.float)
     zoom_data = zoom(voxels, zoom_factor, order=poly_order)
     zoom_data = zoom_data > threshold
     zoom_data_orig_shape = numpy.zeros_like(voxels)
@@ -65,7 +71,7 @@ def volumetric_scale(voxels, zoom_factor, threshold=0.4, poly_order=0):
 
 
 def rotation(ind3D, theta, Nvox):
-    rot_mat = rotation_matrix((0, 0, 1), math.radians(theta))
+    rot_mat = rotation_matrix((0, 0, 1), math.radians(-theta))
     Nvox_half = Nvox / 2.0
     for i, ind in enumerate(ind3D):
         ind = numpy.dot(rot_mat, ind - Nvox_half) + Nvox_half
@@ -75,7 +81,7 @@ def rotation(ind3D, theta, Nvox):
 
 
 def rotation_volumetric(voxels, theta, threshold=0.4, poly_order=0):
-    return rotate(voxels, theta, reshape=False, order=poly_order) > threshold
+    return rotate(voxels.astype(np.float), theta, reshape=False, order=poly_order) > threshold
 
 
 def range_assert(ind3D, Nvox=88):
@@ -100,6 +106,10 @@ def points3D2voxelcoord(points3D_centered, Nvox=88, cube=(250., 250., 250.)):
     cube = numpy.asarray(cube, 'float32')
 
     return float(Nvox) * (points3D_centered + (cube / 2.)) / cube
+
+
+def relative_cube_points3D2voxelcoord(points3D_centered, Nvox=88):
+    return float(Nvox) * (points3D_centered + 1.0) / 2.0
 
 
 def voxelM2voxelcoord(V):
@@ -127,7 +137,8 @@ def augmentation_volumetric(volumetric_data, label_stack, cubes=None, grid_size_
     label_stack_augs = []
     for i in range(repetitions):
         for volume_aug, label_stack_aug, cube in zip(volumetric_data, label_stack, cubes):
-            label_stack_aug = points3D2voxelcoord(label_stack_aug, Nvox=grid_size_label, cube=cube)
+            #label_stack_aug = points3D2voxelcoord(label_stack_aug, Nvox=grid_size_label, cube=cube)
+            label_stack_aug = relative_cube_points3D2voxelcoord(label_stack_aug, Nvox=grid_size_label)
             draw = [random.random(), random.random(), random.random()]
             if draw[0] >= app_thres:
                 value = [random.uniform(scale_range[0], scale_range[1]),
@@ -135,13 +146,14 @@ def augmentation_volumetric(volumetric_data, label_stack, cubes=None, grid_size_
                          random.uniform(scale_range[0], scale_range[1])]
 
                 volume_aug = volumetric_scale(volume_aug, value, poly_order=poly_order)
-
                 label_stack_aug = scale(label_stack_aug, value, grid_size_label)
+
             if draw[1] >= app_thres:
                 value = random.uniform(rotation_range[0], rotation_range[1])
-                volume_aug = rotation_volumetric(volume_aug, value, poly_order=poly_order)
-
+                value = -20
+                volume_aug = rotation_volumetric(volume_aug, value, poly_order=0, threshold=0.4)
                 label_stack_aug = rotation(label_stack_aug, value, grid_size_label)
+
             if draw[2] >= app_thres:
                 value = [random.uniform(translation_range[0], translation_range[1]),
                          random.uniform(translation_range[0], translation_range[1]),
@@ -149,7 +161,7 @@ def augmentation_volumetric(volumetric_data, label_stack, cubes=None, grid_size_
 
                 ind3D_aug = voxelM2voxelcoord(volume_aug)
                 if ind3D_aug.size != 0:
-                    ind3D_aug = translation(ind3D_aug, (value[0], value[1], value[2]), grid_size_data)
+                    ind3D_aug = translation(ind3D_aug, (value[1], value[0], value[2]), grid_size_data)
                     volume_aug = voxelM(ind3D_aug, grid_size_data)
 
                     value[0] /= grid_size_data / float(grid_size_label)
@@ -247,12 +259,12 @@ def augmentation_volumetric_full_voxel(ind3DList, labelStackList, cubes, Nvox_da
                          random.uniform(scale_range[0], scale_range[1]),
                          random.uniform(scale_range[0], scale_range[1])]
 
-                volume_aug = volumetric_scale(volume_aug, value, poly_order=poly_order)
+                volume_aug = volumetric_scale(volume_aug, value, poly_order=poly_order, threshold=0.6)
 
                 labelStack_aug = scale(labelStack_aug, value, Nvox_label)
             if draw[1] >= app_thres:
                 value = random.uniform(rotation_range[0], rotation_range[1])
-                volume_aug = rotation_volumetric(volume_aug, value, poly_order=poly_order)
+                volume_aug = rotation_volumetric(volume_aug, value, poly_order=poly_order, threshold=0.6)
 
                 labelStack_aug = rotation(labelStack_aug, value, Nvox_label)
             if draw[2] >= app_thres:

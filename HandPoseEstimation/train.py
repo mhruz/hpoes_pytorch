@@ -106,6 +106,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
         loss = checkpoint["loss"]
 
     key = args.data_label
+    cubes_key = args.cubes_label
 
     if args.dev_h5 is not None:
         f_dev = h5py.File(args.dev_h5)
@@ -119,7 +120,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             s = time.time()
 
         num_samples = len(f_train[key])
-        data_train = {'cubes': f_train['cubes'][:], 'labels': f_train['labels'][:], key: {}}
+        data_train = {cubes_key: f_train[cubes_key][:], 'labels': f_train['labels'][:], key: {}}
 
         for i in range(num_samples):
             data_train[key][str(i)] = f_train[key][str(i)][:]
@@ -135,7 +136,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
                 s = time.time()
 
             num_samples_dev = len(f_dev[key])
-            data_dev = {'cubes': f_dev['cubes'][:], 'labels': f_dev['labels'][:], key: {}}
+            data_dev = {cubes_key: f_dev[cubes_key][:], 'labels': f_dev['labels'][:], key: {}}
 
             for i in range(num_samples_dev):
                 data_dev[key][str(i)] = f_dev[key][str(i)][:]
@@ -243,7 +244,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
                 batch_data.append(data)
                 batch_labels.append(data_train['labels'][index_of_data])
 
-                cubes.append(data_train['cubes'][index_of_data])
+                cubes.append(data_train[cubes_key][index_of_data])
 
             (batch_data, batch_labels) = v2v_misc.augmentation_volumetric(batch_data, batch_labels, cubes,
                                                                           grid_size_label=label_grid_size)
@@ -328,6 +329,8 @@ if __name__ == '__main__':
     parser.add_argument('--save_iter', type=int, help='interval of saving a model (in epochs), default = 1', default=1)
     parser.add_argument('--data_label', type=str, help='the label of data in the H5 file, default = real_voxels',
                         default='real_voxels')
+    parser.add_argument('--cubes_label', type=str, help='the label of cubes in the H5 file, default = cube',
+                        default='cube')
     parser.add_argument('--global_joints', action="store_true",
                         help='whether to learn the identity of the joints (False) or whether to predict one heatmap of'
                              'unknown joint locations (True), default = False', default=False)
@@ -335,6 +338,7 @@ if __name__ == '__main__':
                         help='whether to read all the training data to memory, only '
                              'use for reasonable small data (< RAM)', default=False)
     parser.add_argument('--multi_node_params', type=int, nargs=2, help='rank and world_size')
+
 
     parser.add_argument('output', type=str, help='name of the output model')
     args = parser.parse_args()
