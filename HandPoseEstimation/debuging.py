@@ -43,7 +43,7 @@ def visualisation2(V, labelStack, heatMaps, Nvox_data=88, Nvox_label_heatMap=44)
                          mode="cube",
                          color=(0, 1, 0),
                          scale_factor=0.75)
-    # mayavi.mlab.show()
+    #mayavi.mlab.show()
 
     # zaokrouhlit na int
     labelStack_resized = (labelStack - Nvox_label_heatMap / 2.0) * ratio + Nvox_data / 2.0
@@ -52,7 +52,7 @@ def visualisation2(V, labelStack, heatMaps, Nvox_data=88, Nvox_label_heatMap=44)
     n = len(indL)
     U = np.zeros((Nvox_data, Nvox_data, Nvox_data), dtype='bool')
     for j in range(n):
-        U[indL[j][2], indL[j][1], indL[j][0]] = True
+        U[indL[j][0], indL[j][1], indL[j][2]] = True
 
         # vizualizace
     xx, yy, zz = np.where(U == True)
@@ -66,7 +66,7 @@ def visualisation2(V, labelStack, heatMaps, Nvox_data=88, Nvox_label_heatMap=44)
     for i in range(heatMaps.shape[0]):
         # vizualizace
         E = heatMaps[i, :, :, :]
-        xx, yy, zz = np.where(E > 0.2)
+        yy, xx, zz = np.where(E > 0.1)
         xx = (xx - Nvox_label_heatMap / 2.0) * ratio + Nvox_data / 2.0
         yy = (yy - Nvox_label_heatMap / 2.0) * ratio + Nvox_data / 2.0
         zz = (zz - Nvox_label_heatMap / 2.0) * ratio + Nvox_data / 2.0
@@ -78,7 +78,7 @@ def visualisation2(V, labelStack, heatMaps, Nvox_data=88, Nvox_label_heatMap=44)
 
 
 #data_train = h5py.File(r'w:\cv\hpoes2\data\HANDS2019\train_com94_voxels.h5', 'r')
-data_train = h5py.File(r'w:\cv\hpoes2\data\NYU\train_comrefV2V_voxels.h5', 'r')
+data_train = h5py.File(r'/home/mighty/repositories/hpoes_pytorch/train_comrefV2V_voxels.h5', 'r')
 
 key = 'real_voxels'
 
@@ -97,7 +97,8 @@ for i in [0, 2]:
 
 (batch_data_aug, batch_labels_aug) = v2v_misc.augmentation_volumetric(batch_data, batch_labels, repetitions=3, grid_size_label=88, app_thres=0.0, poly_order=0)
 batch_labels_np = np.array(batch_labels_aug)
-target_gpu = v2v_misc.make_global_heat_map_gpu(batch_labels_np, device=0)
+target_gpu = v2v_misc.make_global_heat_map_gpu(batch_labels_np, device=0, grid_size=88).cpu()
+np.expand_dims(target_gpu, 0)
 
 for i in range(batch_data_aug.shape[0]):
     #visualisation3(batch_data_aug[i], batch_labels_aug[i], Nvox_label=88)
