@@ -137,7 +137,6 @@ def augmentation_volumetric(volumetric_data, label_stack, cubes=None, grid_size_
     label_stack_augs = []
     for i in range(repetitions):
         for volume_aug, label_stack_aug, cube in zip(volumetric_data, label_stack, cubes):
-            #label_stack_aug = points3D2voxelcoord(label_stack_aug, Nvox=grid_size_label, cube=cube)
             label_stack_aug = relative_cube_points3D2voxelcoord(label_stack_aug, Nvox=grid_size_label)
             draw = [random.random(), random.random(), random.random()]
             if draw[0] >= app_thres:
@@ -150,7 +149,6 @@ def augmentation_volumetric(volumetric_data, label_stack, cubes=None, grid_size_
 
             if draw[1] >= app_thres:
                 value = random.uniform(rotation_range[0], rotation_range[1])
-                value = -20
                 volume_aug = rotation_volumetric(volume_aug, value, poly_order=0, threshold=0.4)
                 label_stack_aug = rotation(label_stack_aug, value, grid_size_label)
 
@@ -333,8 +331,9 @@ def make_heat_maps_gpu(label_stack, sigma=1.7, grid_size=44, nominal_cube_shape=
 
     points = torch.from_numpy(label_stack).to(device)
 
-    dx = points[0] - x
-    dy = points[1] - y
+    # matrices are y, x, z, we have to reflect that in labels
+    dx = points[1] - x
+    dy = points[0] - y
     dz = points[2] - z
     dx = dx ** 2
     dy = dy ** 2
@@ -364,45 +363,8 @@ def make_global_heat_map_gpu(label_stack, sigma=1.7, grid_size=44, nominal_cube_
     Returns:
 
     """
-    # handle device string
-    device = "cuda:{}".format(device)
-    # select proper mem size for gridsize
-    if grid_size <= 255:
-        grid_size_dtype = torch.uint8
-    else:
-        grid_size_dtype = torch.int16
+    value = make_heat_maps_gpu(label_stack, sigma, grid_size, nominal_cube_shape, cubes, device)
 
-    batch_size = label_stack.shape[0]
-    num_points = label_stack.shape[1]
-
-    label_stack = numpy.moveaxis(label_stack, 2, 0)
-    label_stack = label_stack.reshape([3, batch_size, num_points, 1, 1, 1])
-
-    inv_radius = torch.ones(batch_size, dtype=torch.float32, device=device)
-
-    if cubes is not None and not all(cubes[:, 0] == nominal_cube_shape):
-        inv_radius /= (nominal_cube_shape / cubes[:, 0]) ** 2
-
-    inv_radius *= -1 / (2 * sigma * sigma)
-
-    x = torch.arange(grid_size, dtype=grid_size_dtype, device=device).reshape((1, 1, grid_size, 1, 1))
-    y = torch.arange(grid_size, dtype=grid_size_dtype, device=device).reshape((1, 1, 1, grid_size, 1))
-    z = torch.arange(grid_size, dtype=grid_size_dtype, device=device).reshape((1, 1, 1, 1, grid_size))
-
-    points = torch.from_numpy(label_stack).to(device)
-
-    dx = points[0] - x
-    dy = points[1] - y
-    dz = points[2] - z
-    dx = dx ** 2
-    dy = dy ** 2
-    dz = dz ** 2
-    ds = (dx + dy + dz)
-
-    inv_radius = inv_radius.expand(ds.shape[1], ds.shape[2], ds.shape[3], ds.shape[4], ds.shape[0])
-    inv_radius = inv_radius.permute(4, 0, 1, 2, 3)
-
-    value = torch.exp(inv_radius * ds)
     value, indices = torch.max(value, dim=1, keepdim=True)
 
     return value

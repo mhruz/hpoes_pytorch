@@ -95,7 +95,7 @@ for i in [0, 2]:
     batch_data.append(data)
     batch_labels.append(labels)
 
-(batch_data_aug, batch_labels_aug) = v2v_misc.augmentation_volumetric(batch_data, batch_labels, repetitions=3, grid_size_label=88, app_thres=0.0, poly_order=0)
+(batch_data_aug, batch_labels_aug) = v2v_misc.augmentation_volumetric(batch_data, batch_labels, repetitions=3, grid_size_label=88, app_thres=0.0, poly_order=1)
 batch_labels_np = np.array(batch_labels_aug)
 target_gpu = v2v_misc.make_global_heat_map_gpu(batch_labels_np, device=0, grid_size=88).cpu()
 np.expand_dims(target_gpu, 0)
