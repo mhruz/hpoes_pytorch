@@ -5,7 +5,7 @@ import numpy as np
 import mayavi.mlab
 
 
-def visualisation3(V, labelStack, Nvox_data=88, Nvox_label=88):
+def visualisation3(V, labelStack, Nvox_data=88, Nvox_label=88, show=True):
     ##### visualisation #####
 
     ratio = Nvox_data / float(Nvox_label)
@@ -31,7 +31,9 @@ def visualisation3(V, labelStack, Nvox_data=88, Nvox_label=88):
                          mode="cube",
                          color=(1, 0, 0),
                          scale_factor=1.2)
-    mayavi.mlab.show()
+
+    if show:
+        mayavi.mlab.show()
 
 
 def visualisation2(V, labelStack, heatMaps, Nvox_data=88, Nvox_label_heatMap=44):
@@ -85,7 +87,7 @@ key = 'real_voxels'
 batch_data = []
 batch_labels = []
 
-for i in [0, 2]:
+for i in [1500, 1502]:
     pdata = data_train[key][str(i)][:].tostring()
     _file = io.BytesIO(pdata)
     data = np.load(_file)['arr_0']
@@ -99,6 +101,9 @@ for i in [0, 2]:
 batch_labels_np = np.array(batch_labels_aug)
 target_gpu = v2v_misc.make_global_heat_map_gpu(batch_labels_np, device=0, grid_size=88).cpu()
 np.expand_dims(target_gpu, 0)
+
+for i in range(len(batch_data)):
+    visualisation3(batch_data[i], batch_labels[i], Nvox_label=88, show=True)
 
 for i in range(batch_data_aug.shape[0]):
     #visualisation3(batch_data_aug[i], batch_labels_aug[i], Nvox_label=88)
