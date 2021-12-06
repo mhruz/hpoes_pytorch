@@ -16,7 +16,6 @@ PyQt5-sip==12.8.1
 scipy==1.6.0
 six==1.15.0
 torch==1.7.0+cu101
-torchaudio==0.7.0
 torchvision==0.8.1+cu101
 traits==6.1.1
 traitsui==7.1.1
