@@ -1,3 +1,4 @@
+import torch.nn
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -70,16 +71,16 @@ class EncoderDecorder(nn.Module):
         super(EncoderDecorder, self).__init__()
 
         self.encoder_pool1 = Pool3DBlock(2)
-        self.encoder_res1 = Res3DBlock(base_width, 2 * base_width) #res04
+        self.encoder_res1 = Res3DBlock(base_width, 2 * base_width)  # res04
         self.encoder_pool2 = Pool3DBlock(2)
-        self.encoder_res2 = Res3DBlock(2 * base_width, 4 * base_width) #res05
+        self.encoder_res2 = Res3DBlock(2 * base_width, 4 * base_width)  # res05
 
-        self.mid_res = Res3DBlock(4 * base_width, 4 * base_width) #res06
+        self.mid_res = Res3DBlock(4 * base_width, 4 * base_width)  # res06
 
         self.decoder_res2 = Res3DBlock(4 * base_width, 4 * base_width)
-        self.decoder_upsample2 = Upsample3DBlock(4 * base_width, 2 * base_width, 2, 2) #up01
-        self.decoder_res1 = Res3DBlock(2 * base_width, 2 * base_width)  #res07
-        self.decoder_upsample1 = Upsample3DBlock(2 * base_width, base_width, 2, 2) #up02
+        self.decoder_upsample2 = Upsample3DBlock(4 * base_width, 2 * base_width, 2, 2)  # up01
+        self.decoder_res1 = Res3DBlock(2 * base_width, 2 * base_width)  # res07
+        self.decoder_upsample1 = Upsample3DBlock(2 * base_width, base_width, 2, 2)  # up02
 
         self.skip_res1 = Res3DBlock(base_width, base_width)
         self.skip_res2 = Res3DBlock(2 * base_width, 2 * base_width)
@@ -150,6 +151,7 @@ class V2VModel88(nn.Module):
     """
     This model has one more decoder layer to output a feature map of 88x88x88
     """
+
     def __init__(self, input_channels, num_joints, width_multiplier=1):
         super(V2VModel88, self).__init__()
         base_width = 16 * width_multiplier
@@ -190,3 +192,12 @@ class V2VModel88(nn.Module):
             elif isinstance(m, nn.ConvTranspose3d):
                 nn.init.normal_(m.weight, 0, 0.001)
                 nn.init.constant_(m.bias, 0)
+
+
+class HandsFormer3D(nn.Module):
+    def __init__(self, encoder_layers=6, decoder_layers=6, d_model=512,
+                 nhead=8, dim_feedforward=2048):
+        super(HandsFormer3D, self).__init__()
+
+        self.transformer = torch.nn.Transformer(d_model, nhead, encoder_layers, decoder_layers, dim_feedforward)
+

@@ -445,33 +445,41 @@ def detect_best_joint_locations(heatmaps, n_joints, suppress_size):
     if len(heatmaps.shape) < 5:
         heatmaps = numpy.expand_dims(heatmaps, 0)
 
-    # pad the heatmaps
-    padded_heatmaps = np.zeros((heatmaps.shape[0], heatmaps.shape[1], heatmaps.shape[2] + suppress_size - 1,
-                                heatmaps.shape[3] + suppress_size - 1, heatmaps.shape[4] + suppress_size - 1))
+    if suppress_size > 1:
+        # pad the heatmaps
+        padded_heatmaps = np.zeros((heatmaps.shape[0], heatmaps.shape[1], heatmaps.shape[2] + suppress_size - 1,
+                                    heatmaps.shape[3] + suppress_size - 1, heatmaps.shape[4] + suppress_size - 1))
 
-    pad_start = (suppress_size - 1) // 2
+        pad_start = (suppress_size - 1) // 2
 
-    padded_heatmaps[:, :, pad_start:-pad_start, pad_start:-pad_start, pad_start:-pad_start] = heatmaps
+        padded_heatmaps[:, :, pad_start:-pad_start, pad_start:-pad_start, pad_start:-pad_start] = heatmaps
 
-    size = padded_heatmaps.shape[2]
-    # H = numpy.zeros((suppress_size, suppress_size, suppress_size), dtype=numpy.float32)
+        size = padded_heatmaps.shape[2]
+    else:
+        padded_heatmaps = heatmaps
 
     maximums_batch = []
 
     # go through batch data
     for (i, hm) in enumerate(padded_heatmaps):
-        maximums = []
-        values = []
-        for a in range(size):
-            for b in range(size):
-                for c in range(size):
-                    H = hm[0][a:a + suppress_size, b:b + suppress_size, c:c + suppress_size]
-                    max_idx = np.unravel_index(np.argmax(H), H.shape)
-                    if all(idx == pad_start for idx in max_idx):
-                        values.append(H[pad_start, pad_start, pad_start])
-                        maximums.append([a + pad_start, b + pad_start, c + pad_start])
+        if suppress_size > 1:
+            maximums = []
+            values = []
+            for a in range(size):
+                for b in range(size):
+                    for c in range(size):
+                        H = hm[0][a:a + suppress_size, b:b + suppress_size, c:c + suppress_size]
+                        max_idx = np.unravel_index(np.argmax(H), H.shape)
+                        if all(idx == pad_start for idx in max_idx):
+                            values.append(H[pad_start, pad_start, pad_start])
+                            maximums.append([a + pad_start, b + pad_start, c + pad_start])
 
-        maxs_sorted = [x for _, x in sorted(zip(values, maximums), reverse=True)]
-        maximums_batch.append(maxs_sorted[:n_joints])
+            maxs_sorted = [x for _, x in sorted(zip(values, maximums), reverse=True)]
+            maximums_batch.append(maxs_sorted[:n_joints])
+
+        else:
+            idx = np.argpartition(hm.flatten(), -n_joints)[-n_joints:]
+            maxs_sorted = np.vstack(np.unravel_index(idx, hm.shape[1:])).T
+            maximums_batch.append(maxs_sorted)
 
     return maximums_batch
