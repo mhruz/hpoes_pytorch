@@ -23,6 +23,9 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
     # global rank of the process
     rank = local_rank + global_rank_offset
 
+    if gpu_rank == -1:
+        gpu_rank = rank
+
     # device string representation
     device = "cuda:{}".format(gpu_rank)
 
@@ -337,18 +340,32 @@ if __name__ == '__main__':
     parser.add_argument('--read_data_to_memory', action="store_true",
                         help='whether to read all the training data to memory, only '
                              'use for reasonable small data (< RAM)', default=False)
-    parser.add_argument('--multi_node_params', type=int, nargs=2, help='rank and world_size')
-
+    # parser.add_argument('--multi_node_params', type=int, nargs=2, help='rank and world_size')
+    parser.add_argument('--n_procs', type=int,
+                        help='number of processes (GPUs) to train with, -1 means all GPUs will be used')
 
     parser.add_argument('output', type=str, help='name of the output model')
     args = parser.parse_args()
 
-    if args.multi_node_params is not None:
-        node_id = args.multi_node_params[0]
-        world_size = args.multi_node_params[1]
-        gpu_rank = args.multi_node_params[0]
+    # if args.multi_node_params is not None:
+    #     node_id = args.multi_node_params[0]
+    #     world_size = args.multi_node_params[1]
+    #     gpu_rank = args.multi_node_params[0]
+    #     os.environ['MASTER_ADDR'] = '127.0.0.1'
+    #     os.environ['MASTER_PORT'] = '8888'
+    if args.n_procs is not None:
+        if args.n_procs == -1:
+            world_size = torch.cuda.device_count()
+        else:
+            world_size = args.n_procs
+
         os.environ['MASTER_ADDR'] = '127.0.0.1'
         os.environ['MASTER_PORT'] = '8888'
+
+        gpu_rank = -1
+        node_id = 0
+
+        mp.spawn(train_net_on_node, args=(node_id, world_size, gpu_rank, args), nprocs=world_size)
     else:
         # when training on multi-node environment, make sure these environment variables were set before running script
         try:
@@ -364,8 +381,8 @@ if __name__ == '__main__':
 
         print("gpus_per_node: {}".format(gpus_per_node))
 
-    print("node_id: {}".format(node_id))
-    print("gpu_rank: {}".format(gpu_rank))
-    print("size: {}".format(world_size))
+        print("node_id: {}".format(node_id))
+        print("gpu_rank: {}".format(gpu_rank))
+        print("size: {}".format(world_size))
 
-    mp.spawn(train_net_on_node, args=(node_id, world_size, gpu_rank, args))
+        mp.spawn(train_net_on_node, args=(node_id, world_size, gpu_rank, args))
