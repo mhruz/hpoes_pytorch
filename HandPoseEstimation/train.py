@@ -26,6 +26,8 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
     if gpu_rank == -1:
         gpu_rank = rank
 
+    print(f"Running training with rank {rank}, gpu_rank {gpu_rank}\n")
+
     # device string representation
     device = "cuda:{}".format(gpu_rank)
 
