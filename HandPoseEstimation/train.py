@@ -20,6 +20,8 @@ from torchvision.models._utils import IntermediateLayerGetter
 
 
 def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args):
+    print(args)
+
     # global rank of the process
     rank = local_rank + global_rank_offset
 
@@ -91,7 +93,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
             model = V2V(1, num_joints).to(gpu_rank)
 
     if logging:
-        f_log.write("Models initialized.")
+        f_log.write("Models initialized.\n")
         f_log.flush()
 
     # Choose an optimizer algorithm
