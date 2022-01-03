@@ -120,7 +120,7 @@ def train_net_on_node(local_rank, global_rank_offset, world_size, gpu_rank, args
         dev = True
 
     # get the data
-    if args.read_data_to_memory is not None:
+    if args.read_data_to_memory is not None and args.read_data_to_memory is True:
         if logging:
             f_log.write('Reading training data...\n')
             f_log.flush()
