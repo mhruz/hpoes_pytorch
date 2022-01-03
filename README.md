@@ -77,14 +77,30 @@ Multi node, single GPU**. All the variants are run as a module.
 
 **Single node, multi GPU**
 
-`python -m hpoes_pytorch.HandPoseEstimation.train [TRAIN_H5] [OUTPUT_MODEL_H5] --multi_node_params
-rank world_size`
+`python -m hpoes_pytorch.HandPoseEstimation.train [TRAIN_H5] [OUTPUT_MODEL_H5] --n_procs N`
 
-This command needs to be run for each GPU on the node that we want to use. Ranks are from 0 to N-1, where N is the number of
-GPUs we want to use. The `world_size` is the number of processes N.
+`N` is the number of GPUs you want to use. If `N` is -1 all the GPUs will be used. The backend for multi GPU computation is NCCL.
 
 **Multi node, single GPU**
 
-`mpirun -n "$nr_gpus"`
+`mpirun -n N python -m hpoes_pytorch.HandPoseEstimation.train [TRAIN_H5] [OUTPUT_MODEL_H5]`
+
+`N` nodes will be used for the computation. MPI has to be installed (e.g. OPENMPI https://www.open-mpi.org/)
+
+### Optional Training Parameters
+
+`--init_net` type=str, path to pre-trained network (h5), if you want to continue training \
+`--max_epoch` type=int, number of epochs to perform, *default value = 10* \
+`--batch_size` type=int, batch size in each iteration, *default value = 8* \
+`--dev_h5` type=str, path to development h5 file with non-augmented data \
+`--log` type=str, path to output log file \
+`--save_iter` type=int, interval of saving a model (in epochs), *default = 1* \
+`--data_label` type=str, the label of data in the H5 file, *default = 'real_voxels'* \
+`--cubes_label` type=str, the label of cubes in the H5 file, *default = 'cube'* \
+`--global_joints` action="store_true", specify if you want to learn to predict only one heat-map without
+the identity of the joints. \
+`--read_data_to_memory` action="store_true", whether to read all the training data to memory, only use for reasonable
+small data (< RAM) \
+`--n_procs` type=int, number of processes (GPUs) to train with, -1 means all GPUs will be used
 
 ## The Team
