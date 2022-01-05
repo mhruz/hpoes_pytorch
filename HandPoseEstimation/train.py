@@ -344,19 +344,12 @@ if __name__ == '__main__':
     parser.add_argument('--read_data_to_memory', action="store_true",
                         help='whether to read all the training data to memory, only '
                              'use for reasonable small data (< RAM)', default=False)
-    # parser.add_argument('--multi_node_params', type=int, nargs=2, help='rank and world_size')
     parser.add_argument('--n_procs', type=int,
                         help='number of processes (GPUs) to train with, -1 means all GPUs will be used')
 
     parser.add_argument('output', type=str, help='name of the output model')
     args = parser.parse_args()
 
-    # if args.multi_node_params is not None:
-    #     node_id = args.multi_node_params[0]
-    #     world_size = args.multi_node_params[1]
-    #     gpu_rank = args.multi_node_params[0]
-    #     os.environ['MASTER_ADDR'] = '127.0.0.1'
-    #     os.environ['MASTER_PORT'] = '8888'
     if args.n_procs is not None:
         if args.n_procs == -1:
             world_size = torch.cuda.device_count()
