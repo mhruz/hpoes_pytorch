@@ -1,3 +1,5 @@
+import sys
+
 from .architectures import V2VModel as V2V, V2VModel88 as V2V88
 from ..Utils import v2v_misc
 
@@ -22,7 +24,7 @@ def consume_prefix_in_state_dict_if_present(state_dict, prefix: str):
     keys = sorted(state_dict.keys())
     for key in keys:
         if key.startswith(prefix):
-            newkey = key[len(prefix) :]
+            newkey = key[len(prefix):]
             state_dict[newkey] = state_dict.pop(key)
 
     # also strip the prefix in metadata if any.
@@ -36,7 +38,7 @@ def consume_prefix_in_state_dict_if_present(state_dict, prefix: str):
 
             if len(key) == 0:
                 continue
-            newkey = key[len(prefix) :]
+            newkey = key[len(prefix):]
             metadata[newkey] = metadata.pop(key)
 
 
@@ -51,6 +53,10 @@ if __name__ == '__main__':
                         default='real_voxels')
     parser.add_argument('--cubes_label', type=str, help='the label of cubes in the H5 file, default = cube',
                         default='cube')
+    parser.add_argument('--global_joints', action="store_true",
+                        help='whether to predict the identity of the joints (False) or whether to predict one heatmap'
+                             ' of unknown joint locations (True), default = False',
+                        default=False)
     parser.add_argument('--compute_accuracy', action="store_true",
                         help='whether to compute the accuracy, if the labels are provided, default = False',
                         default=False)
@@ -61,13 +67,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     f_test = h5py.File(args.test_h5, "r")
+    f_output = open(args.output, "w")
 
     if args.global_joints:
         num_joints = 1
+        model = V2V88(1, num_joints)
     else:
         num_joints = f_test['labels'].shape[1]
-
-    model = V2V88(1, num_joints)
+        model = V2V(1, num_joints)
 
     # make sure the model was saved by process with rank 0
     map_location = {'cuda:%d' % 0: 'cpu'}
@@ -83,10 +90,18 @@ if __name__ == '__main__':
     batch_size = args.batch_size
     cubes_key = args.cubes_label
 
+    acc = 0.0
+
     # get the data
     if args.read_data_to_memory is not None and args.read_data_to_memory is True:
         num_samples = len(f_test[key])
-        data_test = {cubes_key: f_test[cubes_key][:], 'labels': f_test['labels'][:], key: {}}
+        data_test = {cubes_key: f_test[cubes_key][:]}
+        if args.compute_accuracy:
+            try:
+                data_test['labels'] = f_test['labels'][:]
+            except KeyError:
+                print("When compute_accuracy is set, you need to provide labels in th H5 file.")
+                sys.exit(1)
 
         for i in range(num_samples):
             data_test[key][str(i)] = f_test[key][str(i)][:]
@@ -119,4 +134,26 @@ if __name__ == '__main__':
 
         pred = model(batch_data)
 
-        points_3d = v2v_misc.heat_maps2points3d_smooth_max(pred, cubes)
+        points_3d = v2v_misc.heat_maps2points3d_smooth_max(pred.detach().numpy(), cubes)
+
+        for out in points_3d[0]:
+            f_output.write(" ".join(map(str, out.flatten())))
+            f_output.write("\n")
+
+        f_output.flush()
+
+        if args.compute_accuracy:
+            labels = []
+            for label, cube in zip(batch_labels, cubes):
+                labels.append(label * np.tile(cube, (label.shape[0], 1)))
+
+            acc_batch = np.array(labels) - points_3d[0]
+            acc_batch = np.square(acc_batch)
+            acc_batch = np.sum(acc_batch, axis=2)
+            acc_batch = np.sqrt(acc_batch)
+            acc_batch = np.mean(acc_batch)
+
+            acc += acc_batch / num_samples
+
+    f_output.write("Accuracy: {}".format(acc))
+    f_output.close()

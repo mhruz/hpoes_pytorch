@@ -91,7 +91,8 @@ Multi node, single GPU**. All the variants are run as a module.
 
 `--init_net` type=str, path to pre-trained network (h5), if you want to continue training \
 `--max_epoch` type=int, number of epochs to perform, *default value = 10* \
-`--batch_size` type=int, batch size in each iteration, *default value = 8* \
+`--batch_size` type=int, batch size in each iteration, when more GPUs are used, this value is divided
+by the number of GPUs, *default value = 8* \
 `--dev_h5` type=str, path to development h5 file with non-augmented data \
 `--log` type=str, path to output log file \
 `--save_iter` type=int, interval of saving a model (in epochs), *default = 1* \
