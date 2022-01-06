@@ -91,9 +91,7 @@ if __name__ == '__main__':
         for i in range(num_samples):
             data_test[key][str(i)] = f_test[key][str(i)][:]
     else:
-        data_train = f_test
-
-    data_test = f_test
+        data_test = f_test
 
     num_samples = len(data_test[key])
 
@@ -107,6 +105,8 @@ if __name__ == '__main__':
             _file = io.BytesIO(pdata)
             data = np.load(_file)['arr_0']
 
+            cubes.append(data_test[cubes_key][i + idx])
+
             batch_data.append(data)
             if args.compute_accuracy:
                 if "labels" not in data_test:
@@ -114,12 +114,9 @@ if __name__ == '__main__':
 
                 batch_labels.append(data_test['labels'][i + idx])
 
-                yy, xx, zz = batch_labels[-1][:, 0], batch_labels[-1][:, 1], batch_labels[-1][:, 2]
-
-                label_stack = v2v_misc.relative_cube_points3D2voxelcoord(batch_labels[-1])
-
         batch_data = np.expand_dims(batch_data, 1).astype(np.float32)
         batch_data = torch.tensor(batch_data)
 
         pred = model(batch_data)
 
+        points_3d = v2v_misc.heat_maps2points3d_smooth_max(pred, cubes)

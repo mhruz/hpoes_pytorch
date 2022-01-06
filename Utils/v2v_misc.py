@@ -20,9 +20,9 @@ def rotation_matrix(axis, theta):
     aa, bb, cc, dd = a * a, b * b, c * c, d * d
     bc, ad, ac, ab, bd, cd = b * c, a * d, a * c, a * b, b * d, c * d
 
-    R =  numpy.array([[aa + bb - cc - dd, 2 * (bc + ad), 2 * (bd - ac)],
-                        [2 * (bc - ad), aa + cc - bb - dd, 2 * (cd + ab)],
-                        [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc]])
+    R = numpy.array([[aa + bb - cc - dd, 2 * (bc + ad), 2 * (bd - ac)],
+                     [2 * (bc - ad), aa + cc - bb - dd, 2 * (cd + ab)],
+                     [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc]])
 
     return R
 
@@ -287,8 +287,8 @@ def augmentation_volumetric_full_voxel(ind3DList, labelStackList, cubes, Nvox_da
     return numpy.asarray(Vs, dtype='float32'), numpy.asarray(labelStack_augs, dtype='float32')
 
 
-# promitne fullvoxel data do dane osy
-# vstup data je 3D boolean matrix
+# projects fullvoxel data onto the given axis
+# input is a 3D boolean matrix
 def project_fullvoxel(data, axis=2, flip=False):
     if flip:
         data = numpy.flip(data, axis=axis)
@@ -370,7 +370,7 @@ def make_global_heat_map_gpu(label_stack, sigma=1.7, grid_size=44, nominal_cube_
     return value
 
 
-def heatMaps2VoxelCPU(heatmaps, Nvox=44):
+def heat_maps2voxel_cpu(heatmaps, Nvox=44):
     if len(heatmaps.shape) < 5:
         heatmaps = numpy.expand_dims(heatmaps, 0)
 
@@ -393,7 +393,7 @@ def heatMaps2VoxelCPU(heatmaps, Nvox=44):
     return ret
 
 
-def heatMaps2Points3D_smooth_max(heatmaps, cubes, Nvox=44, smooth_size=3):
+def heat_maps2points3d_smooth_max(heatmaps, cubes, Nvox=44, smooth_size=3):
     # heatmaps have shape (batch, num_joints, Nvox, Nvox, Nvox)
     if len(heatmaps.shape) < 5:
         heatmaps = numpy.expand_dims(heatmaps, 0)
@@ -424,15 +424,14 @@ def heatMaps2Points3D_smooth_max(heatmaps, cubes, Nvox=44, smooth_size=3):
             for a in range(left_bound, right_bound):
                 for b in range(left_bound, right_bound):
                     for c in range(left_bound, right_bound):
-                        if ind[0] + a >= 0 and ind[0] + a < Nvox and ind[1] + b >= 0 and ind[1] + b < Nvox and ind[
-                            2] + c >= 0 and ind[2] + c < Nvox:
+                        if 0 <= ind[0] + a < Nvox and 0 <= ind[1] + b < Nvox and 0 <= ind[2] + c < Nvox:
                             H[a - left_bound, b - left_bound, c - left_bound] = h[
                                 int(ind[0]) + a, int(ind[1]) + b, int(ind[2]) + c]
                         else:
                             H[a - left_bound, b - left_bound, c - left_bound] = 0
 
             H = numpy.expand_dims(H, 0)
-            ind_s = heatMaps2VoxelCPU(H, Nvox=smooth_size)[0]
+            ind_s = heat_maps2voxel_cpu(H, Nvox=smooth_size)[0]
             ret[i, j, :] = ((ind + ind_s - center) / float(Nvox) - 0.5) * cubes[i][0]
 
             ret_conf[i, j] = interpn((x1, x2, x3), H[0], ind_s, bounds_error=False, fill_value=None)
