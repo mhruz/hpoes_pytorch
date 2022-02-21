@@ -1,5 +1,5 @@
 {
-    "objdir_source": "/home/zdenek/mnt/pole/data-ntis/projects/korpusy_cv/hpoes/datasets/nyu/dataset/train/",
+    "objdir_source": "../Data/nyu/dataset/train/",
     "trainlabelsfilename": "../Data/nyu/joint_data_train.txt",
     "bbcomsfilename": "../Data/nyu/center_train_refined.txt",
     "cube": [
